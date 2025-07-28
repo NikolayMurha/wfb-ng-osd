@@ -167,14 +167,16 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
         if(rtsp_src != NULL)
         {
             asprintf(&src_str,
-                     "rtspsrc latency=%d location=\"%s\"", rtp_jitter, rtsp_src);
+                     "rtspsrc latency=%d protocols=tcp location=\"%s\"", rtp_jitter, rtsp_src);
         } else {
             asprintf(&src_str,
-                     "udpsrc port=%d caps=\"application/x-rtp,media=(string)video,  clock-rate=(int)90000, encoding-name=(string)H%s\"",
-                     rtp_port, codec + 1);
+                     "udpsrc port=%d caps=\"application/x-rtp,media=(string)video,  clock-rate=(int)90000, encoding-name=(string)H%s\" ! "
+                     "rtpjitterbuffer latency=%d",
+                     rtp_port, codec + 1, rtp_jitter);
         }
 
-        char *codecs[] = {"nv%sdec", "v4l2%sdec", "avdec_%s"};
+        char *codecs[] = {"nv%sdec", "v4l2%sdec", "vaapi%sdec", "avdec_%s"};
+        char *codecs_args[] = {NULL, NULL, "low-latency=true", "std-compliance=normal"};
         char *decoder = NULL;
 
         for(int i = 0; i < sizeof(codecs) / sizeof(codecs[0]); i++)
@@ -186,7 +188,15 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
             if(tmp != NULL)
             {
                 gst_object_unref(tmp);
-                decoder = buf;
+                if(codecs_args[i] != NULL)
+                {
+                    asprintf(&decoder, "%s %s", buf, codecs_args[i]);
+                    free(buf);
+                }
+                else
+                {
+                    decoder = buf;
+                }
                 break;
             }
 

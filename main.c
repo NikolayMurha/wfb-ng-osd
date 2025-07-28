@@ -89,7 +89,7 @@ int main(int argc, char **argv)
     int osd_port = 14551;
     int rtp_port = 5600;
     char* codec = "h264";
-    int rtp_jitter = 5;
+    int rtp_jitter = 0;
     osd_render_t osd_render = OSD_RENDER_GL;
     int screen_width = 1920;
     char *rtsp_url = NULL;
