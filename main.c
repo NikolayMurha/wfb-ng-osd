@@ -19,7 +19,6 @@
  * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -27,7 +26,6 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -47,7 +45,27 @@
 
 
 #ifdef __GST_OPENGL__
-int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *rtsp_url);
+int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url);
+#ifdef __APPLE__
+#include <gst/gstmacos.h>
+#endif
+
+typedef struct {
+    int rtp_port;
+    char *codec;
+    int rtp_jitter;
+    osd_render_t osd_render;
+    int screen_width;
+    char *input_url;
+} gst_thread_args_t;
+
+static void *gst_thread_start(void *arg)
+{
+    gst_thread_args_t *args = (gst_thread_args_t *)arg;
+    gst_main(args->rtp_port, args->codec, args->rtp_jitter, args->osd_render, args->screen_width, args->input_url);
+    fprintf(stderr, "gst thread exited\n");
+    exit(1);
+}
 #endif
 
 static volatile uint8_t finished = 0;
@@ -58,107 +76,90 @@ void sigterm_handler(int signum)
     finished = 1;
 }
 
-int open_udp_socket_for_rx(int port)
+static int open_udp_socket_for_rx(int port)
 {
     struct sockaddr_in saddr;
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd < 0){
+    if (fd < 0) {
         perror("Error opening socket");
         exit(1);
     }
 
     int optval = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval , sizeof(int));
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval, sizeof(int));
 
-    bzero((char *) &saddr, sizeof(saddr));
+    bzero((char *)&saddr, sizeof(saddr));
     saddr.sin_family = AF_INET;
     saddr.sin_addr.s_addr = htonl(INADDR_ANY);
     saddr.sin_port = htons((unsigned short)port);
 
-    if (bind(fd, (struct sockaddr *) &saddr, sizeof(saddr)) < 0)
-    {
+    if (bind(fd, (struct sockaddr *)&saddr, sizeof(saddr)) < 0) {
         perror("Bind error");
         exit(1);
     }
     return fd;
 }
 
-int main(int argc, char **argv)
+static int osd_main(int argc, char **argv)
 {
     int opt;
     int osd_port = 14551;
     int rtp_port = 5600;
-    char* codec = "h264";
+    char *codec = "h264";
     int rtp_jitter = 0;
+    int heartbeat_tx_enabled = 0;
+    int heartbeat_tx_interval_ms = 1000;
+#ifdef __APPLE__
+    osd_render_t osd_render = OSD_RENDER_AUTO;
+#else
     osd_render_t osd_render = OSD_RENDER_GL;
+#endif
     int screen_width = 1920;
-    char *rtsp_url = NULL;
+    char *input_url = NULL;
 
     uint64_t render_ts = 0;
     uint64_t cur_ts = 0;
-    uint8_t buf[65536]; // Max UDP packet size
+    uint8_t buf[65536];
     int fd;
     struct pollfd fds[1];
+    telemetry_watchdog_t telemetry_watchdog;
 
-    while ((opt = getopt(argc, argv, "hdp:P:R:45j:xakw:")) != -1) {
+    telemetry_watchdog_init(&telemetry_watchdog);
+
+    while ((opt = getopt(argc, argv, "hdp:P:R:45j:Hi:xakw:")) != -1) {
         switch (opt) {
-        case 'p':
-            osd_port = atoi(optarg);
+        case 'p': osd_port    = atoi(optarg); break;
+        case 'P': rtp_port    = atoi(optarg); break;
+        case 'R': input_url   = strdup(optarg); break;
+        case '4': codec       = "h264"; break;
+        case '5': codec       = "h265"; break;
+        case 'j': rtp_jitter  = atoi(optarg); break;
+        case 'H': heartbeat_tx_enabled = 1; break;
+        case 'i':
+            heartbeat_tx_interval_ms = atoi(optarg);
+            if (heartbeat_tx_interval_ms <= 0) {
+                fprintf(stderr, "Invalid heartbeat interval: %s\n", optarg);
+                goto show_usage;
+            }
             break;
-
-        case 'P':
-            rtp_port = atoi(optarg);
-            break;
-
-        case 'R':
-            rtsp_url = strdup(optarg);
-            break;
-
-        case '4':
-            codec = "h264";
-            break;
-
-        case '5':
-            codec = "h265";
-            break;
-
-        case 'j':
-            rtp_jitter = atoi(optarg);
-            break;
-
-        case 'x':
-            osd_render = OSD_RENDER_XV;
-            break;
-
-        case 'a':
-            osd_render = OSD_RENDER_AUTO;
-            break;
-
-        case 'k':
-            osd_render = OSD_RENDER_KMS;
-            break;
-
-        case 'w':
-            screen_width = atoi(optarg);
-            break;
-
-        case 'd':
-            osd_debug = 1;
-            break;
-
+        case 'x': osd_render  = OSD_RENDER_XV; break;
+        case 'a': osd_render  = OSD_RENDER_AUTO; break;
+        case 'k': osd_render  = OSD_RENDER_KMS; break;
+        case 'w': screen_width = atoi(optarg); break;
+        case 'd': osd_debug   = 1; break;
         case 'h':
         default:
         show_usage:
-
 #ifdef __GST_OPENGL__
-            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [ -R rtsp_url ] [-4] [-5] [-j rtp_jitter] [-x] [-a] [-w screen_width] \n", argv[0]);
-            fprintf(stderr, "Default: mavlink_port=%d, rtp_port=%d, rtsp_url=%s, codec=%s, rtp_jitter=%d, screen_width=%d\n",
+            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [ -R input_url ] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-w screen_width] \n", argv[0]);
+            fprintf(stderr, "Default: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, screen_width=%d\n",
                     osd_port, rtp_port,
-                    rtsp_url != NULL ? rtsp_url : "none",
-                    codec, rtp_jitter, screen_width);
+                    input_url != NULL ? input_url : "none",
+                    codec, rtp_jitter, heartbeat_tx_enabled, heartbeat_tx_interval_ms, screen_width);
 #else
-            fprintf(stderr, "%s [-p mavlink_port]\n", argv[0]);
-            fprintf(stderr, "Default: mavlink_port=%d\n", osd_port);
+            fprintf(stderr, "%s [-p mavlink_port] [-H] [-i heartbeat_ms]\n", argv[0]);
+            fprintf(stderr, "Default: mavlink_port=%d, heartbeat_tx=%d, heartbeat_ms=%d\n",
+                    osd_port, heartbeat_tx_enabled, heartbeat_tx_interval_ms);
 #endif
             fprintf(stderr, "WFB-ng OSD version " WFB_OSD_VERSION "\n");
             fprintf(stderr, "WFB-ng home page: <http://wfb-ng.org>\n");
@@ -166,55 +167,59 @@ int main(int argc, char **argv)
         }
     }
 
-    if (optind > argc) {
+    if (optind > argc)
         goto show_usage;
-    }
+
+    telemetry_watchdog_set_heartbeat_tx(&telemetry_watchdog, heartbeat_tx_enabled, (uint32_t)heartbeat_tx_interval_ms);
 
 #ifdef __GST_OPENGL__
-    printf("Use: mavlink_port=%d, rtp_port=%d, rtsp_url=%s, codec=%s, rtp_jitter=%d, osd_render=%d, screen_width=%d\n",
+    printf("Use: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, osd_render=%d, screen_width=%d\n",
            osd_port, rtp_port,
-           rtsp_url != NULL ? rtsp_url : "none",
-           codec, rtp_jitter, osd_render, screen_width);
+           input_url != NULL ? input_url : "none",
+           codec, rtp_jitter, heartbeat_tx_enabled, heartbeat_tx_interval_ms, osd_render, screen_width);
 
     osd_init(0, 0, 1, 1);
     fd = open_udp_socket_for_rx(osd_port);
 
-    void* gst_thread_start(void *arg)
-    {
-        gst_main(rtp_port, codec, rtp_jitter, osd_render, screen_width, rtsp_url);
-        fprintf(stderr, "gst thread exited\n");
-        exit(1);
-    }
+    gst_thread_args_t gst_args = {
+        .rtp_port   = rtp_port,
+        .codec      = codec,
+        .rtp_jitter = rtp_jitter,
+        .osd_render = osd_render,
+        .screen_width = screen_width,
+        .input_url  = input_url,
+    };
 
     pthread_t tid;
-    pthread_create(&tid, NULL, gst_thread_start, NULL);
+    pthread_create(&tid, NULL, gst_thread_start, &gst_args);
 
-    while(1)
-    {
+    while (1) {
         ssize_t rsize;
-        while((rsize = recv(fd, buf, sizeof(buf), 0)) >= 0)
-        {
-            // Avoid race with rendering in gstreamer
+        struct sockaddr_in src_addr;
+        socklen_t src_len = sizeof(src_addr);
+        while ((rsize = recvfrom(fd, buf, sizeof(buf), 0, (struct sockaddr *)&src_addr, &src_len)) >= 0) {
+            mavlink_rx_meta_t meta = {0};
             pthread_mutex_lock(&video_mutex);
-            parse_mavlink_packet(buf, rsize);
+            parse_mavlink_packet(buf, rsize, &meta);
             pthread_mutex_unlock(&video_mutex);
+            telemetry_watchdog_update(fd, &src_addr, &meta, &telemetry_watchdog);
+            src_len = sizeof(src_addr);
         }
 
-        if (rsize < 0 && errno != EINTR)
-        {
+        if (rsize < 0 && errno != EINTR) {
             perror("Error receiving packet");
             exit(1);
         }
     }
 
 #else
-    printf("Use mavlink_port=%d\n", osd_port);
+    printf("Use mavlink_port=%d, heartbeat_tx=%d, heartbeat_ms=%d\n",
+           osd_port, heartbeat_tx_enabled, heartbeat_tx_interval_ms);
 
     osd_init(0, 0, 1, 1);
     fd = open_udp_socket_for_rx(osd_port);
 
-    if(fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK) < 0)
-    {
+    if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK) < 0) {
         perror("Unable to set socket into nonblocked mode");
         exit(1);
     }
@@ -227,44 +232,62 @@ int main(int argc, char **argv)
     signal(SIGINT, sigterm_handler);
 
     fprintf(stderr, "Starting event loop\n");
-    while(!finished)
-    {
+    while (!finished) {
         cur_ts = GetSystimeMS();
         uint64_t sleep_ts = render_ts > cur_ts ? render_ts - cur_ts : 0;
         int rc = poll(fds, 1, sleep_ts);
 
-        if (rc < 0){
+        if (rc < 0) {
             if (errno == EINTR || errno == EAGAIN) continue;
             perror("Poll error");
             exit(1);
         }
 
-        if (fds[0].revents & (POLLERR | POLLNVAL))
-        {
+        if (fds[0].revents & (POLLERR | POLLNVAL)) {
             fprintf(stderr, "socket error!");
             exit(1);
         }
 
-        if (fds[0].revents & POLLIN){
+        if (fds[0].revents & POLLIN) {
             ssize_t rsize;
-            while((rsize = recv(fd, buf, sizeof(buf), 0)) >= 0)
-            {
-                parse_mavlink_packet(buf, rsize);
+            struct sockaddr_in src_addr;
+            socklen_t src_len = sizeof(src_addr);
+            while ((rsize = recvfrom(fd, buf, sizeof(buf), 0, (struct sockaddr *)&src_addr, &src_len)) >= 0) {
+                mavlink_rx_meta_t meta = {0};
+                parse_mavlink_packet(buf, rsize, &meta);
+                telemetry_watchdog_update(fd, &src_addr, &meta, &telemetry_watchdog);
+                src_len = sizeof(src_addr);
             }
-            if (rsize < 0 && errno != EWOULDBLOCK){
+            if (rsize < 0 && errno != EWOULDBLOCK && errno != EAGAIN) {
                 perror("Error receiving packet");
                 exit(1);
             }
         }
 
         cur_ts = GetSystimeMS();
-        if (render_ts <= cur_ts)
-        {
-            render_ts = cur_ts + 1000 / 30; // 30Hz osd refresh rate
+        if (render_ts <= cur_ts) {
+            render_ts = cur_ts + 1000 / 30;
             render();
         }
     }
     fprintf(stderr, "Event loop finished\n");
 #endif
     return 0;
+}
+
+#if defined(__APPLE__) && defined(__GST_OPENGL__)
+static int osd_main_macos(int argc, char **argv, gpointer user_data)
+{
+    (void)user_data;
+    return osd_main(argc, argv);
+}
+#endif
+
+int main(int argc, char **argv)
+{
+#if defined(__APPLE__) && defined(__GST_OPENGL__)
+    return gst_macos_main(osd_main_macos, argc, argv, NULL);
+#else
+    return osd_main(argc, argv);
+#endif
 }

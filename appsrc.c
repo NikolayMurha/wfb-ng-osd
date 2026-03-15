@@ -145,12 +145,14 @@ static const char* select_osd_render(osd_render_t osd_render)
 }
 
 
-int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *rtsp_src)
+int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url)
 {
     int screen_height = screen_width * 9 / 16;
 
-    // Fix for intel hd graphics
+    // EGL is Linux-centric; on macOS let GStreamer select the native GL backend.
+#ifdef __linux__
     setenv("GST_GL_PLATFORM", "egl", 0);
+#endif
 
     /* init GStreamer */
     gst_init (NULL, NULL);
@@ -163,12 +165,23 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
         char *pipeline_str = NULL;
         char *src_str = NULL;
         GError *error = NULL;
+        gboolean is_srt_source = FALSE;
 
-        if(rtsp_src != NULL)
+        if (input_url != NULL && g_str_has_prefix(input_url, "srt://"))
+        {
+            is_srt_source = TRUE;
+            asprintf(&src_str,
+                     "srtsrc uri=\"%s\" latency=%d",
+                     input_url, rtp_jitter);
+        }
+        else if (input_url != NULL)
         {
             asprintf(&src_str,
-                     "rtspsrc latency=%d protocols=tcp location=\"%s\"", rtp_jitter, rtsp_src);
-        } else {
+                     "rtspsrc latency=%d protocols=tcp location=\"%s\"",
+                     rtp_jitter, input_url);
+        }
+        else
+        {
             asprintf(&src_str,
                      "udpsrc port=%d caps=\"application/x-rtp,media=(string)video,  clock-rate=(int)90000, encoding-name=(string)H%s\" ! "
                      "rtpjitterbuffer latency=%d",
@@ -209,30 +222,60 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
             exit(1);
         }
 
-        asprintf(&pipeline_str,
-                 "%s ! "
-                 "rtp%sdepay ! "
-                 "%sparse config-interval=1 disable-passthrough=true ! "
-                 "%s qos=false ! "
-                 "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
-                 "glupload ! glcolorconvert ! "
-                 "glvideomixerelement emit-signals=true start-time-selection=1 name=osd_mixer "
-                 "sink_0::emit-signals=true sink_0::width=%d sink_0::height=%d sink_0::zorder=-2 "
-                 "sink_1::emit-signals=true sink_1::width=%d sink_1::height=%d sink_1::zorder=0 "
+        if (is_srt_source)
+        {
+            asprintf(&pipeline_str,
+                     "%s ! "
+                     "tsdemux ! "
+                     "%sparse config-interval=1 disable-passthrough=true ! "
+                     "%s qos=false ! "
+                     "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                     "glupload ! glcolorconvert ! "
+                     "glvideomixerelement emit-signals=true start-time-selection=1 name=osd_mixer "
+                     "sink_0::emit-signals=true sink_0::width=%d sink_0::height=%d sink_0::zorder=-2 "
+                     "sink_1::emit-signals=true sink_1::width=%d sink_1::height=%d sink_1::zorder=0 "
 #if LOCAL_CAMERA_SUPPORT
-                 "sink_2::emit-signals=true sink_2::width=640 sink_2::height=360 sink_2::zorder=-1 "
+                     "sink_2::emit-signals=true sink_2::width=640 sink_2::height=360 sink_2::zorder=-1 "
 #endif
-                 "! %s sync=true "
-                 "appsrc name=osd_src stream-type=0 format=time min-latency=0 ! "
-                 "video/x-raw,format=RGBA,width=%d,height=%d,framerate=0/1 ! glupload ! glcolorconvert ! osd_mixer. "
+                     "! %s sync=true "
+                     "appsrc name=osd_src stream-type=0 format=time min-latency=0 ! "
+                     "video/x-raw,format=RGBA,width=%d,height=%d,framerate=0/1 ! glupload ! glcolorconvert ! osd_mixer. "
 #if LOCAL_CAMERA_SUPPORT
-                 "v4l2src device=/dev/video2 ! video/x-raw,width=640,height=360,framerate=30/1 ! queue ! glupload ! glcolorconvert ! osd_mixer."
+                     "v4l2src device=/dev/video2 ! video/x-raw,width=640,height=360,framerate=30/1 ! queue ! glupload ! glcolorconvert ! osd_mixer."
 #endif
-                 ,
-                 src_str, codec, codec, decoder,
-                 screen_width, screen_height, screen_width, screen_height,
-                 select_osd_render(osd_render),
-                 GRAPHICS_WIDTH, GRAPHICS_HEIGHT);
+                     ,
+                     src_str, codec, decoder,
+                     screen_width, screen_height, screen_width, screen_height,
+                     select_osd_render(osd_render),
+                     GRAPHICS_WIDTH, GRAPHICS_HEIGHT);
+        }
+        else
+        {
+            asprintf(&pipeline_str,
+                     "%s ! "
+                     "rtp%sdepay ! "
+                     "%sparse config-interval=1 disable-passthrough=true ! "
+                     "%s qos=false ! "
+                     "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                     "glupload ! glcolorconvert ! "
+                     "glvideomixerelement emit-signals=true start-time-selection=1 name=osd_mixer "
+                     "sink_0::emit-signals=true sink_0::width=%d sink_0::height=%d sink_0::zorder=-2 "
+                     "sink_1::emit-signals=true sink_1::width=%d sink_1::height=%d sink_1::zorder=0 "
+#if LOCAL_CAMERA_SUPPORT
+                     "sink_2::emit-signals=true sink_2::width=640 sink_2::height=360 sink_2::zorder=-1 "
+#endif
+                     "! %s sync=true "
+                     "appsrc name=osd_src stream-type=0 format=time min-latency=0 ! "
+                     "video/x-raw,format=RGBA,width=%d,height=%d,framerate=0/1 ! glupload ! glcolorconvert ! osd_mixer. "
+#if LOCAL_CAMERA_SUPPORT
+                     "v4l2src device=/dev/video2 ! video/x-raw,width=640,height=360,framerate=30/1 ! queue ! glupload ! glcolorconvert ! osd_mixer."
+#endif
+                     ,
+                     src_str, codec, codec, decoder,
+                     screen_width, screen_height, screen_width, screen_height,
+                     select_osd_render(osd_render),
+                     GRAPHICS_WIDTH, GRAPHICS_HEIGHT);
+        }
 
         free(src_str);
         free(decoder);

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash /Users/nikolay/Projects/LegitForce/snipe/wfb-ng-osd/build_dist.sh --help)",
+      "Bash(bash -n /Users/nikolay/Projects/LegitForce/snipe/wfb-ng-osd/build_dist.sh)",
+      "Bash(docker run:*)",
+      "Bash(make clean:*)",
+      "Bash(make osd:*)"
+    ]
+  }
+}

@@ -6,6 +6,7 @@ Supported platforms:
   * Radxa Zero 3W/3E -- use hardware overlay mode (libdrm)
   * OrangePi 5 -- use hardware overlay mode (libdrm)
   * Any other Linux with X11/Wayland and GPU -- use GStreamer OpenGL mixer
+  * macOS with Homebrew GStreamer -- use GStreamer OpenGL mixer (`mode=gst`)
 
 Supported autopilots:
 ---------------------
@@ -17,24 +18,45 @@ Supported autopilots:
 Building:
 ---------
 
+0. Initialize submodules:
+  * `git submodule update --init --recursive`
+
 1. Build for Linux (X11 or Wayland) (native build):
   * `apt-get install gstreamer1.0-tools pkg-config libgstreamer1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-bad gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly libgstreamer-plugins-base1.0-dev`
   * `make osd`
 
-2. Build for Raspberry PI 0-3 (OpenVG) (native build):
+2. Build for macOS (Homebrew) (native build):
+  * `brew install pkg-config glib gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly`
+  * `make osd mode=gst`
+
+3. Build for Raspberry PI 0-3 (OpenVG) (native build):
   * `make osd mode=rpi3`
 
-3. Build for Radxa or OrangePi (libdrm) (native build):
+4. Build for Radxa or OrangePi (libdrm) (native build):
   * `apt-get install libdrm-dev pkg-config`
   * `make osd mode=rockchip`
+
+5. Build Docker images for Linux x86/64 and ARM64:
+  * `make osd_image_all`
+  * images: `wfb-ng-osd:latest-amd64`, `wfb-ng-osd:latest-arm64`
+  * optional multi-arch push: `make osd_image_push OSD_DOCKER_IMAGE=<repo/name> OSD_DOCKER_TAG=<tag>`
+
+6. Build binary artifacts into `dist/` (macOS ARM + Linux amd64/arm64):
+  * script: `./build_dist.sh`
+  * outputs: `dist/mac.arm/osd.gst`, `dist/x86/osd.gst`, `dist/aarch64/osd.gst`
+  * optional modes: `DIST_LINUX_MODES="gst rockchip" ./build_dist.sh`
 
 Running:
 --------
 
 Default mavlink port is UDP 14551.
 Default RTP video port is UDP 5600.
+Optional input URL via `-R` supports `rtsp://...` and `srt://...`.
+Optional MAVLink TX heartbeat:
+  * `-H` enable periodic OSD heartbeat transmission to the selected target
+  * `-i <ms>` heartbeat interval in milliseconds (default: `1000`)
 
-   * Run `./osd`
+   * For `mode=gst`, run `./osd.gst`
    * You should got screen like this:
      ![gstreamer](scr1.png)
 

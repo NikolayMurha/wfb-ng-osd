@@ -3,10 +3,21 @@ PYTHON ?= python3
 SHELL = /bin/bash
 ENV ?= $(PWD)/env
 OS_CODENAME ?= $(shell lsb_release -cs)
+UNAME_S ?= $(shell uname -s)
 STDEB ?= "git+https://github.com/svpcom/stdeb"
 DOCKER_ARCH ?= amd64
 DOCKER_SRC_IMAGE ?= "p2ptech/cross-build:2023-02-21-raspios-bullseye-armhf-lite"
 QEMU_CPU ?= "max"
+OSD_DOCKERFILE ?= docker/Dockerfile.osd
+OSD_DOCKER_IMAGE ?= wfb-ng-osd
+OSD_DOCKER_TAG ?= latest
+OSD_DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
+
+ifeq ($(UNAME_S),Linux)
+    RT_LIB ?= -lrt
+else
+    RT_LIB ?=
+endif
 
 ifneq ("$(wildcard .git)","")
     RELEASE ?= $(or $(shell git rev-parse --abbrev-ref HEAD | grep -v '^stable$$'),\
@@ -32,15 +43,15 @@ CFLAGS += -DWFB_OSD_VERSION='"$(VERSION)-$(shell /bin/bash -c '_tmp=$(COMMIT); e
 
 ifeq ($(mode), gst)
     CFLAGS += -Wall -pthread -std=gnu99 -D__GST_OPENGL__ -fPIC $(shell pkg-config --cflags glib-2.0) $(shell pkg-config --cflags gstreamer-1.0)
-    LDFLAGS += $(shell pkg-config --libs glib-2.0) $(shell pkg-config --libs gstreamer-1.0) $(shell pkg-config --libs gstreamer-video-1.0) -lgstapp-1.0 -lpthread -lrt -lm
+    LDFLAGS += $(shell pkg-config --libs glib-2.0) $(shell pkg-config --libs gstreamer-1.0) $(shell pkg-config --libs gstreamer-video-1.0) -lgstapp-1.0 -lpthread $(RT_LIB) -lm
     OBJS = main.o osdrender.o osdmavlink.o graphengine.o UAVObj.o m2dlib.o math3d.o osdconfig.o osdvar.o fonts.o font_outlined8x14.o font_outlined8x8.o appsrc.o gst-compat.o
 else ifeq ($(mode), rockchip)
     CFLAGS += -Wall -pthread -std=gnu99 -D__DRM_ROCKCHIP__ -fPIC $(shell pkg-config --cflags libdrm)
-    LDFLAGS += $(shell pkg-config --libs libdrm) -lpthread -lrt -lm
+    LDFLAGS += $(shell pkg-config --libs libdrm) -lpthread $(RT_LIB) -lm
     OBJS = main.o osdrender.o osdmavlink.o graphengine.o UAVObj.o m2dlib.o math3d.o osdconfig.o osdvar.o fonts.o font_outlined8x14.o font_outlined8x8.o drm_output.o
 else ifeq ($(mode), rpi3)
     CFLAGS += -Wall -pthread -std=gnu99 -D__BCM_OPENVG__ -I/opt/vc/include/ -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux
-    LDFLAGS += -L/opt/vc/lib/ -lbrcmGLESv2 -lbrcmEGL -lopenmaxil -lbcm_host -lvcos -lvchiq_arm -lpthread -lrt -lm
+    LDFLAGS += -L/opt/vc/lib/ -lbrcmGLESv2 -lbrcmEGL -lopenmaxil -lbcm_host -lvcos -lvchiq_arm -lpthread $(RT_LIB) -lm
     OBJS = main.o osdrender.o osdmavlink.o graphengine.o UAVObj.o m2dlib.o math3d.o osdconfig.o osdvar.o fonts.o font_outlined8x14.o font_outlined8x8.o oglinit.o
 else
     $(error Valid modes are: gst, rockchip or rpi3)
@@ -71,7 +82,17 @@ deb_docker:  /opt/qemu/bin
 
 osd_docker: deb_docker
 
+osd_image_amd64:
+	docker buildx build --platform linux/amd64 -f $(OSD_DOCKERFILE) -t $(OSD_DOCKER_IMAGE):$(OSD_DOCKER_TAG)-amd64 --load .
+
+osd_image_arm64:
+	docker buildx build --platform linux/arm64 -f $(OSD_DOCKERFILE) -t $(OSD_DOCKER_IMAGE):$(OSD_DOCKER_TAG)-arm64 --load .
+
+osd_image_all: osd_image_amd64 osd_image_arm64
+
+osd_image_push:
+	docker buildx build --platform $(OSD_DOCKER_PLATFORMS) -f $(OSD_DOCKERFILE) -t $(OSD_DOCKER_IMAGE):$(OSD_DOCKER_TAG) --push .
+
 clean:
 	rm -rf osd.{rockchip,gst,rpi3} deb_dist *.o *~
 	make -C fpv_video clean
-

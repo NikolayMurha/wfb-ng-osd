@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1
+# Multi-stage build для wfb-ng-osd
+# Підтримувані режими (OSD_MODE): gst | rockchip | rpi3
+#
+# gst/rockchip → debian:bookworm-slim, linux/amd64 або linux/arm64
+#   docker buildx build --platform linux/amd64 -f docker/Dockerfile.osd \
+#     --build-arg OSD_MODE=gst --target artifact --output type=local,dest=./out .
+#
+# rpi3 → debian:bullseye-slim + RPi OS bullseye репо, linux/arm/v7
+#   docker buildx build --platform linux/arm/v7 -f docker/Dockerfile.osd \
+#     --build-arg OSD_MODE=rpi3 --build-arg BASE_IMAGE=debian:bullseye-slim \
+#     --target artifact --output type=local,dest=./out .
+#   (VideoCore IV /opt/vc є тільки в Bullseye; в Bookworm його прибрали)
+
+ARG BASE_IMAGE=debian:bookworm-slim
+
+# ────────────────────────────────────────────────────────────
+# builder — загальне середовище збірки
+# ────────────────────────────────────────────────────────────
+FROM ${BASE_IMAGE} AS builder
+
+ARG OSD_MODE=gst
+ARG VERSION=0.0.0
+ARG COMMIT=release
+ARG SOURCE_DATE_EPOCH=0
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Залежності:
+#   gst/rockchip → стандартний Debian репо (bookworm)
+#   rpi3         → Raspberry Pi OS bullseye репо для libraspberrypi-dev (/opt/vc + VG/openvg.h)
+RUN set -e; \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        gnupg \
+        curl \
+        build-essential \
+        pkg-config \
+        libglib2.0-dev \
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
+        libgstreamer-plugins-bad1.0-dev \
+        libdrm-dev \
+    && rm -rf /var/lib/apt/lists/*; \
+    if [ "${OSD_MODE}" = "rpi3" ]; then \
+        curl -fsSL https://archive.raspberrypi.org/debian/raspberrypi.gpg.key \
+            | gpg --dearmor -o /etc/apt/trusted.gpg.d/raspberrypi.gpg; \
+        echo "deb http://archive.raspberrypi.org/debian/ bullseye main" \
+            > /etc/apt/sources.list.d/raspi.list; \
+        apt-get update && apt-get install -y --no-install-recommends \
+            libraspberrypi-dev \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+WORKDIR /build
+
+COPY . .
+
+RUN make clean && \
+    make osd mode=${OSD_MODE} \
+         VERSION=${VERSION} \
+         COMMIT=${COMMIT} \
+         SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+
+# ────────────────────────────────────────────────────────────
+# artifact — тільки бінарник, для --output type=local
+# ────────────────────────────────────────────────────────────
+FROM scratch AS artifact
+
+ARG OSD_MODE=gst
+
+COPY --from=builder /build/osd.${OSD_MODE} /osd.${OSD_MODE}

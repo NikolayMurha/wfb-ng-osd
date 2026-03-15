@@ -11,7 +11,6 @@
 #include <string.h>
 #include <utime.h>
 #include <unistd.h>
-#include <endian.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <time.h>
