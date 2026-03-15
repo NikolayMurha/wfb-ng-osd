@@ -166,7 +166,7 @@ void write_char(char ch, int x, int y, int flags, int font, int color);
 void write_string(char *str, int x, int y, int xs, int ys, int va, int ha, int flags, int font);
 void write_color_string(char *str, int x, int y, int xs, int ys, int va, int ha, int flags, int font, int color);
 
-int fetch_font_info(uint8_t ch, int font, struct FontEntry *font_info, char *lookup);
+int fetch_font_info(uint8_t ch, int font, struct FontEntry *font_info, uint8_t *lookup);
 void calc_text_dimensions(char *str, struct FontEntry font, int xs, int ys, struct FontDimensions *dim);
 
 extern uint8_t* video_buf_ext;

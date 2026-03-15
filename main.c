@@ -117,11 +117,13 @@ static int osd_main(int argc, char **argv)
     int screen_width = 1920;
     char *input_url = NULL;
 
-    uint64_t render_ts = 0;
-    uint64_t cur_ts = 0;
     uint8_t buf[65536];
     int fd;
+#ifndef __GST_OPENGL__
+    uint64_t render_ts = 0;
+    uint64_t cur_ts = 0;
     struct pollfd fds[1];
+#endif
     telemetry_watchdog_t telemetry_watchdog;
 
     telemetry_watchdog_init(&telemetry_watchdog);

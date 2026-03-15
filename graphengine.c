@@ -680,7 +680,7 @@ void write_triangle_wire(int x0, int y0, int x1, int y1, int x2, int y2) {
  * @param       ch              character
  * @param       font    font id
  */
-int fetch_font_info(uint8_t ch, int font, struct FontEntry *font_info, char *lookup) {
+int fetch_font_info(uint8_t ch, int font, struct FontEntry *font_info, uint8_t *lookup) {
   // First locate the font struct.
   if ((unsigned int)font > SIZEOF_ARRAY(fonts)) {
     return 0;             // font does not exist, exit.
@@ -749,7 +749,7 @@ void write_char16(char ch, int x, int y, int font, int color) {
  */
 void write_char(char ch, int x, int y, int flags, int font, int color) {
   struct FontEntry font_info;
-  char lookup = 0;
+  uint8_t lookup = 0;
 
   fetch_font_info(ch, font, &font_info, &lookup);
 
@@ -880,4 +880,3 @@ void write_color_string(char *str, int x, int y, int xs, int ys, int va, int ha,
     str++;
   }
 }
-

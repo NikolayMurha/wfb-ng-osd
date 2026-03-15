@@ -61,7 +61,9 @@ on_message (GstBus * bus, GstMessage * message, gpointer user_data)
 
         gst_message_parse_warning (message, &err, &debug);
         g_warning ("Got WARNING: %s (%s)", err->message, GST_STR_NULL (debug));
-        g_main_loop_quit (loop);
+        g_error_free (err);
+        g_free (debug);
+        // Не виходимо — warnings не є фатальними (напр. timestamping на старті)
         break;
     }
 
@@ -96,7 +98,10 @@ static void cb_need_data (GstElement *appsrc, guint unused_size, gpointer user_d
     GstBuffer *buffer = render();
     pthread_mutex_unlock(&video_mutex);
 
-    GST_BUFFER_PTS (buffer) = gst_element_get_current_running_time(appsrc);
+    GstClockTime pts = gst_element_get_current_running_time(appsrc);
+    // Якщо clock ще не готовий — використовуємо 0, але не пропускаємо буфер:
+    // appsrc повинен завжди пушити, інакше mixer може почати виводити відео без OSD.
+    GST_BUFFER_PTS (buffer) = GST_CLOCK_TIME_IS_VALID(pts) ? pts : 0;
 
     // set to min supported fps,
     // but low value will increase latency.
@@ -166,6 +171,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
         char *src_str = NULL;
         GError *error = NULL;
         gboolean is_srt_source = FALSE;
+        gboolean is_generic_uri_source = FALSE;
 
         if (input_url != NULL && g_str_has_prefix(input_url, "srt://"))
         {
@@ -174,11 +180,20 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                      "srtsrc uri=\"%s\" latency=%d",
                      input_url, rtp_jitter);
         }
-        else if (input_url != NULL)
+        else if (input_url != NULL &&
+                 (g_str_has_prefix(input_url, "rtsp://") ||
+                  g_str_has_prefix(input_url, "rtsps://")))
         {
             asprintf(&src_str,
                      "rtspsrc latency=%d protocols=tcp location=\"%s\"",
                      rtp_jitter, input_url);
+        }
+        else if (input_url != NULL)
+        {
+            is_generic_uri_source = TRUE;
+            asprintf(&src_str,
+                     "uridecodebin uri=\"%s\" name=uri_src",
+                     input_url);
         }
         else
         {
@@ -188,38 +203,40 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                      rtp_port, codec + 1, rtp_jitter);
         }
 
-        char *codecs[] = {"nv%sdec", "v4l2%sdec", "vaapi%sdec", "avdec_%s"};
-        char *codecs_args[] = {NULL, NULL, "low-latency=true", "std-compliance=normal"};
         char *decoder = NULL;
-
-        for(int i = 0; i < sizeof(codecs) / sizeof(codecs[0]); i++)
+        if (!is_generic_uri_source)
         {
-            char *buf = NULL;
-            asprintf(&buf, codecs[i], codec);
-            GstElement *tmp = gst_element_factory_make(buf, "decoder");
-
-            if(tmp != NULL)
+            char *codecs[] = {"nv%sdec", "v4l2%sdec", "vaapi%sdec", "avdec_%s"};
+            char *codecs_args[] = {NULL, NULL, "low-latency=true", "std-compliance=normal"};
+            for (size_t i = 0; i < sizeof(codecs) / sizeof(codecs[0]); i++)
             {
-                gst_object_unref(tmp);
-                if(codecs_args[i] != NULL)
+                char *buf = NULL;
+                asprintf(&buf, codecs[i], codec);
+                GstElement *tmp = gst_element_factory_make(buf, "decoder");
+
+                if (tmp != NULL)
                 {
-                    asprintf(&decoder, "%s %s", buf, codecs_args[i]);
-                    free(buf);
+                    gst_object_unref(tmp);
+                    if (codecs_args[i] != NULL)
+                    {
+                        asprintf(&decoder, "%s %s", buf, codecs_args[i]);
+                        free(buf);
+                    }
+                    else
+                    {
+                        decoder = buf;
+                    }
+                    break;
                 }
-                else
-                {
-                    decoder = buf;
-                }
-                break;
+
+                free(buf);
             }
 
-            free(buf);
-        }
-
-        if(decoder == NULL)
-        {
-            fprintf(stderr, "No decoder for %s was found\n", codec);
-            exit(1);
+            if (decoder == NULL)
+            {
+                fprintf(stderr, "No decoder for %s was found\n", codec);
+                exit(1);
+            }
         }
 
         if (is_srt_source)
@@ -245,6 +262,31 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
 #endif
                      ,
                      src_str, codec, decoder,
+                     screen_width, screen_height, screen_width, screen_height,
+                     select_osd_render(osd_render),
+                     GRAPHICS_WIDTH, GRAPHICS_HEIGHT);
+        }
+        else if (is_generic_uri_source)
+        {
+            asprintf(&pipeline_str,
+                     "%s "
+                     "uri_src. ! "
+                     "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                     "glupload ! glcolorconvert ! "
+                     "glvideomixerelement emit-signals=true start-time-selection=1 name=osd_mixer "
+                     "sink_0::emit-signals=true sink_0::width=%d sink_0::height=%d sink_0::zorder=-2 "
+                     "sink_1::emit-signals=true sink_1::width=%d sink_1::height=%d sink_1::zorder=0 "
+#if LOCAL_CAMERA_SUPPORT
+                     "sink_2::emit-signals=true sink_2::width=640 sink_2::height=360 sink_2::zorder=-1 "
+#endif
+                     "! %s sync=true "
+                     "appsrc name=osd_src stream-type=0 format=time min-latency=0 ! "
+                     "video/x-raw,format=RGBA,width=%d,height=%d,framerate=0/1 ! glupload ! glcolorconvert ! osd_mixer. "
+#if LOCAL_CAMERA_SUPPORT
+                     "v4l2src device=/dev/video2 ! video/x-raw,width=640,height=360,framerate=30/1 ! queue ! glupload ! glcolorconvert ! osd_mixer."
+#endif
+                     ,
+                     src_str,
                      screen_width, screen_height, screen_width, screen_height,
                      select_osd_render(osd_render),
                      GRAPHICS_WIDTH, GRAPHICS_HEIGHT);
@@ -278,7 +320,8 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
         }
 
         free(src_str);
-        free(decoder);
+        if (decoder != NULL)
+            free(decoder);
 
         printf("GST pipeline: %s\n", pipeline_str);
 

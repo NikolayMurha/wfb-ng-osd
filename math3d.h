@@ -232,10 +232,14 @@ void VECTOR4D_Build(VECTOR4D_PTR init, VECTOR4D_PTR term, VECTOR4D_PTR result);
 float VECTOR4D_CosTh(VECTOR4D_PTR va, VECTOR4D_PTR vb);
 
 // 4x4 identity matrix
-const static MATRIX4X4 IMAT_4X4 = { 1, 0, 0, 0,
-                                    0, 1, 0, 0,
-                                    0, 0, 1, 0,
-                                    0, 0, 0, 1 };
+const static MATRIX4X4 IMAT_4X4 = {
+  .M = {
+    {1, 0, 0, 0},
+    {0, 1, 0, 0},
+    {0, 0, 1, 0},
+    {0, 0, 0, 1}
+  }
+};
 // macros to set the identity matrix
 #define MAT_IDENTITY_4X4(m) { memcpy((void *)(m), (void *)&IMAT_4X4, sizeof(MATRIX4X4)); }
 #define MAT_COPY_4X4(src_mat, dest_mat) { memcpy((void *)(dest_mat), (void *)(src_mat), sizeof(MATRIX4X4) ); }

@@ -51,7 +51,9 @@ Running:
 
 Default mavlink port is UDP 14551.
 Default RTP video port is UDP 5600.
-Optional input URL via `-R` supports `rtsp://...` and `srt://...`.
+Optional input URI via `-R`:
+  * optimized paths for `srt://...` and `rtsp(s)://...`
+  * generic URI fallback via GStreamer `uridecodebin` (for example `file://...`, `http://...`, `https://...`), if matching plugins are installed
 Optional MAVLink TX heartbeat:
   * `-H` enable periodic OSD heartbeat transmission to the selected target
   * `-i <ms>` heartbeat interval in milliseconds (default: `1000`)

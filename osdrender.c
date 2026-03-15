@@ -21,6 +21,7 @@
  */
 
 #include <assert.h>
+#include <inttypes.h>
 #include <sys/time.h>
 #include <time.h>
 #include "osdrender.h"
@@ -347,14 +348,13 @@ void draw_throttle(void) {
       return;
   }
 
-  int16_t pos_th_y, pos_th_x;
+  int16_t pos_th_y;
   int posX, posY;
   posX = osd_params.Throt_posX;
   posY = osd_params.Throt_posY;
 
   if (osd_params.Throt_scale_en) {
     pos_th_y = (int16_t)(0.5 * osd_throttle);
-    pos_th_x = posX - 25 + pos_th_y;
     snprintf(tmp_str, sizeof(tmp_str), "THR%3d%%", (int32_t)osd_throttle);
     write_string(tmp_str, posX, posY - 3, 0, 0, TEXT_VA_TOP, TEXT_HA_CENTER, 0, SIZE_TO_FONT[0]);
     if (osd_params.Throttle_Scale_Type == 0) {
@@ -580,7 +580,7 @@ void draw_time() {
 
   if(osd_debug)
   {
-      snprintf(tmp_str, sizeof(tmp_str), "%lu", GetSystimeMS() % 1000000L);
+      snprintf(tmp_str, sizeof(tmp_str), "%" PRIu64, (uint64_t)(GetSystimeMS() % 1000000ULL));
   }
   else
   {
@@ -730,7 +730,7 @@ void draw_rssi() {
   }
 
   //0:percentage 1:raw
-  if ((osd_params.RSSI_raw_en == 0)) {
+  if (osd_params.RSSI_raw_en == 0) {
     uint16_t rssiMin = osd_params.RSSI_min;
     uint16_t rssiMax = osd_params.RSSI_max;
 

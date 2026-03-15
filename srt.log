@@ -1,0 +1,40 @@
+0:00:00.019000750      91166      0x16ba8f000 WARN     GST_ELEMENT_FACTORY gstelementfactory.c:765:gst_element_factory_make_valist: no such element factory "nvh265dec"!
+0:00:00.019041042      91166      0x16ba8f000 WARN     GST_ELEMENT_FACTORY gstelementfactory.c:765:gst_element_factory_make_valist: no such element factory "v4l2h265dec"!
+0:00:00.019046625      91166      0x16ba8f000 WARN     GST_ELEMENT_FACTORY gstelementfactory.c:765:gst_element_factory_make_valist: no such element factory "vaapih265dec"!
+0:00:00.102272833      91166      0x16bcbf000 WARN               glcontext gstglcontext.c:1303:gst_gl_context_create_thread:<glcontextcocoa1> failed to request config gst-gl-context-config, platform=(GstGLPlatform)GST_GL_PLATFORM_CGL, alpha-size=(int)8, depth-size=(int)0, stencil-size=(int)0, red-size=(int)8, green-size=(int)8, blue-size=(int)8, samples=(int)0, sample-buffers=(int)0;
+0:00:00.110273125      91166      0x16bd4b000 WARN              aggregator gstaggregator.c:2355:gst_aggregator_query_latency_unlocked:<osd_mixer> Latency query failed
+0:00:00.110531125      91166      0x16bd4b000 WARN              aggregator gstaggregator.c:2355:gst_aggregator_query_latency_unlocked:<osd_mixer> Latency query failed
+0:00:00.110801958      91166      0x16bd4b000 WARN              aggregator gstaggregator.c:2355:gst_aggregator_query_latency_unlocked:<osd_mixer> Latency query failed
+0:00:00.113727833      91166      0x16bd4b000 WARN              aggregator gstaggregator.c:2355:gst_aggregator_query_latency_unlocked:<osd_mixer> Latency query failed
+0:00:00.113780792      91166      0x16bd4b000 WARN              aggregator gstaggregator.c:2355:gst_aggregator_query_latency_unlocked:<osd_mixer> Latency query failed
+0:00:00.113816625      91166      0x16bd4b000 WARN              aggregator gstaggregator.c:2355:gst_aggregator_query_latency_unlocked:<osd_mixer> Latency query failed
+0:00:00.113967625      91166      0x16bd4b000 WARN              aggregator gstaggregator.c:2355:gst_aggregator_query_latency_unlocked:<osd_mixer> Latency query failed
+0:00:00.267586958      91166      0x1f32a7080 ERROR        glcaopengllayer gstglcaopengllayer.m:161:-[GstGLCAOpenGLLayer copyCGLContextForPixelFormat:]: failed to retrieve GStreamer GL context in CAOpenGLLayer
+0:00:00.536924667      91166      0x16c093000 WARN                  srtsrc gstsrtsrc.c:227:gst_srt_src_fill:<srtsrc0> discont detected 1871411151 (expected: 0)
+0:00:00.573071083      91166      0x16c093000 WARN               h265parse gsth265parse.c:1409:gst_h265_parse_handle_frame:<h265parse0> broken/invalid nal Type: 19 SLICE_IDR_W_RADL, Size: 62481 will be dropped
+0:00:00.574788500      91166      0x16c093000 WARN               h265parse gsth265parse.c:1409:gst_h265_parse_handle_frame:<h265parse0> broken/invalid nal Type: 1 Slice_TRAIL_R, Size: 1402 will be dropped
+0:00:00.577263750      91166      0x16c093000 WARN               h265parse gsth265parse.c:1409:gst_h265_parse_handle_frame:<h265parse0> broken/invalid nal Type: 1 Slice_TRAIL_R, Size: 2207 will be dropped
+0:00:00.669150583      91166      0x16c093000 WARN               h265parse gsth265parse.c:1409:gst_h265_parse_handle_frame:<h265parse0> broken/invalid nal Type: 1 Slice_TRAIL_R, Size: 2003 will be dropped
+0:00:00.690206833      91166      0x16c093000 WARN        mpegtspacketizer mpegtspacketizer.c:1508:calculate_skew: delta - skew: -0:00:07.491051350 too big, reset skew
+0:00:00.745467792      91166      0x16c093000 WARN               h265parse gsth265parse.c:1409:gst_h265_parse_handle_frame:<h265parse0> broken/invalid nal Type: 1 Slice_TRAIL_R, Size: 2082 will be dropped
+0:00:00.760731542      91166      0x16bdd7000 WARN              video-info video-info.c:199:validate_colorimetry: Need to specify a color matrix when using YUV format (I420)
+0:00:00.760770250      91166      0x16bdd7000 WARN              video-info video-info.c:565:gst_video_info_from_caps: invalid colorimetry, using default
+0:00:00.760776833      91166      0x16bdd7000 WARN              video-info video-info.c:199:validate_colorimetry: Need to specify a color matrix when using YUV format (I420)
+0:00:00.760793583      91166      0x16bdd7000 WARN              video-info video-info.c:565:gst_video_info_from_caps: invalid colorimetry, using default
+0:00:00.761102292      91166      0x16b747000 WARN              video-info video-info.c:199:validate_colorimetry: Need to specify a color matrix when using YUV format (I420)
+0:00:00.761131792      91166      0x16b747000 WARN              video-info video-info.c:565:gst_video_info_from_caps: invalid colorimetry, using default
+0:00:00.761192667      91166      0x16bdd7000 WARN              video-info video-info.c:199:validate_colorimetry: Need to specify a color matrix when using YUV format (I420)
+0:00:00.761198583      91166      0x16bdd7000 WARN              video-info video-info.c:565:gst_video_info_from_caps: invalid colorimetry, using default
+0:00:00.761210667      91166      0x16bdd7000 WARN              video-info video-info.c:199:validate_colorimetry: Need to specify a color matrix when using YUV format (I420)
+0:00:00.761219417      91166      0x16bdd7000 WARN              video-info video-info.c:565:gst_video_info_from_caps: invalid colorimetry, using default
+0:00:00.761251917      91166      0x16c093000 WARN              video-info video-info.c:199:validate_colorimetry: Need to specify a color matrix when using YUV format (I420)
+0:00:00.761256542      91166      0x16c093000 WARN              video-info video-info.c:565:gst_video_info_from_caps: invalid colorimetry, using default
+0:00:00.761265083      91166      0x16c093000 WARN              video-info video-info.c:199:validate_colorimetry: Need to specify a color matrix when using YUV format (I420)
+0:00:00.761268667      91166      0x16c093000 WARN              video-info video-info.c:565:gst_video_info_from_caps: invalid colorimetry, using default
+0:00:06.468402667      91166      0x16b747000 WARN             glimagesink gstglimagesink.c:2553:gst_glimage_sink_on_close:<sink> Output window was closed
+0:00:06.480817750      91166      0x16bd4b000 WARN             glimagesink gstglimagesink.c:1951:gst_glimage_sink_show_frame:<sink> error: Quit requested
+
+** (<unknown>:91166): CRITICAL **: 17:11:02.108: Got ERROR: Quit requested (../subprojects/gst-plugins-base/ext/gl/gstglimagesink.c(1951): gst_glimage_sink_show_frame (): /GstPipeline:pipeline0/GstAutoVideoSink:autovideosink0/GstGLImageSinkBin:autovideosink0-actual-sink-glimage/GstGLImageSink:sink)
+0:00:06.482824333      91166      0x16be63000 WARN                 basesrc gstbasesrc.c:3187:gst_base_src_loop:<osd_src> error: Internal data stream error.
+0:00:06.482838625      91166      0x16be63000 WARN                 basesrc gstbasesrc.c:3187:gst_base_src_loop:<osd_src> error: streaming stopped, reason error (-5)
+gst thread exited
