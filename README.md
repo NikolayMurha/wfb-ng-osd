@@ -57,6 +57,11 @@ Optional input URI via `-R`:
 Optional MAVLink TX heartbeat:
   * `-H` enable periodic OSD heartbeat transmission to the selected target
   * `-i <ms>` heartbeat interval in milliseconds (default: `1000`)
+Optional OSD element disable via CLI:
+  * `-D <items>` comma-separated list of groups/items to disable at runtime
+  * groups: `gps`, `wfb`
+  * items: `wfb_state`, `wfb_alarm`, `gps_status`, `gps_coords`, `gps2`, `home`, `cwh`, `warnings`
+  * examples: `-D gps,wfb`, `-D wfb_state`, `-D gps_status,gps_coords`
 
    * For `mode=gst`, run `./osd.gst`
    * You should got screen like this:

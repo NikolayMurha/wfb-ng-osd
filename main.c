@@ -20,6 +20,7 @@
  */
 
 #include <stdio.h>
+#include <ctype.h>
 #include <string.h>
 #include <strings.h>
 #include <errno.h>
@@ -100,6 +101,151 @@ static int open_udp_socket_for_rx(int port)
     return fd;
 }
 
+static char *trim_ws(char *s)
+{
+    if (s == NULL)
+        return NULL;
+
+    while (*s != '\0' && isspace((unsigned char)*s))
+        s++;
+
+    if (*s == '\0')
+        return s;
+
+    char *end = s + strlen(s) - 1;
+    while (end > s && isspace((unsigned char)*end)) {
+        *end = '\0';
+        end--;
+    }
+    return s;
+}
+
+static void disable_group_gps(void)
+{
+    osd_params.GpsStatus_en = 0;
+    osd_params.GpsHDOP_en = 0;
+    osd_params.GpsLat_en = 0;
+    osd_params.GpsLon_en = 0;
+    osd_params.Gps2Status_en = 0;
+    osd_params.Gps2HDOP_en = 0;
+    osd_params.Gps2Lat_en = 0;
+    osd_params.Gps2Lon_en = 0;
+
+    osd_params.HomeDirection_enabled = 0;
+    osd_params.HomeLatitude_enabled = 0;
+    osd_params.HomeLongitude_enabled = 0;
+
+    osd_params.CWH_home_dist_en = 0;
+    osd_params.CWH_wp_dist_en = 0;
+    osd_params.CWH_Tmode_en = 0;
+    osd_params.CWH_Nmode_en = 0;
+
+    osd_params.Map_en = 0;
+    osd_params.Alarm_GPS_status_en = 0;
+}
+
+static void disable_group_wfb(void)
+{
+    osd_params.WFBState_en = 0;
+    osd_params.Alarm_wfb_status_en = 0;
+}
+
+static int disable_single_item(const char *name)
+{
+    if (strcasecmp(name, "gps_status") == 0 || strcasecmp(name, "GpsStatus_en") == 0) {
+        osd_params.GpsStatus_en = 0;
+        return 1;
+    }
+    if (strcasecmp(name, "gps_coords") == 0 || strcasecmp(name, "gps_latlon") == 0) {
+        osd_params.GpsLat_en = 0;
+        osd_params.GpsLon_en = 0;
+        return 1;
+    }
+    if (strcasecmp(name, "gps2") == 0) {
+        osd_params.Gps2Status_en = 0;
+        osd_params.Gps2HDOP_en = 0;
+        osd_params.Gps2Lat_en = 0;
+        osd_params.Gps2Lon_en = 0;
+        return 1;
+    }
+    if (strcasecmp(name, "home") == 0) {
+        osd_params.HomeDirection_enabled = 0;
+        osd_params.HomeLatitude_enabled = 0;
+        osd_params.HomeLongitude_enabled = 0;
+        osd_params.CWH_home_dist_en = 0;
+        return 1;
+    }
+    if (strcasecmp(name, "cwh") == 0) {
+        osd_params.CWH_home_dist_en = 0;
+        osd_params.CWH_wp_dist_en = 0;
+        osd_params.CWH_Tmode_en = 0;
+        osd_params.CWH_Nmode_en = 0;
+        return 1;
+    }
+    if (strcasecmp(name, "wfb_state") == 0 || strcasecmp(name, "WFBState_en") == 0) {
+        osd_params.WFBState_en = 0;
+        return 1;
+    }
+    if (strcasecmp(name, "wfb_alarm") == 0 || strcasecmp(name, "Alarm_wfb_status_en") == 0) {
+        osd_params.Alarm_wfb_status_en = 0;
+        return 1;
+    }
+    if (strcasecmp(name, "warnings") == 0) {
+        osd_params.Alarm_GPS_status_en = 0;
+        osd_params.Alarm_low_batt_en = 0;
+        osd_params.Alarm_low_speed_en = 0;
+        osd_params.Alarm_over_speed_en = 0;
+        osd_params.Alarm_low_alt_en = 0;
+        osd_params.Alarm_over_alt_en = 0;
+        osd_params.Alarm_rc_status_en = 0;
+        osd_params.Alarm_wfb_status_en = 0;
+        return 1;
+    }
+    return 0;
+}
+
+static int disable_item(const char *name)
+{
+    if (strcasecmp(name, "gps") == 0) {
+        disable_group_gps();
+        return 1;
+    }
+    if (strcasecmp(name, "wfb") == 0 || strcasecmp(name, "wfb_link") == 0) {
+        disable_group_wfb();
+        return 1;
+    }
+
+    return disable_single_item(name);
+}
+
+static void apply_disable_list(const char *disable_list)
+{
+    if (disable_list == NULL || *disable_list == '\0')
+        return;
+
+    char *copy = strdup(disable_list);
+    if (copy == NULL) {
+        perror("strdup");
+        exit(1);
+    }
+
+    char *rest = copy;
+    while (rest != NULL) {
+        char *token = strsep(&rest, ",;");
+        token = trim_ws(token);
+        if (token == NULL || *token == '\0')
+            continue;
+
+        if (!disable_item(token)) {
+            fprintf(stderr, "Unknown -D item: %s\n", token);
+        } else {
+            fprintf(stderr, "OSD disabled: %s\n", token);
+        }
+    }
+
+    free(copy);
+}
+
 static int osd_main(int argc, char **argv)
 {
     int opt;
@@ -128,11 +274,12 @@ static int osd_main(int argc, char **argv)
 
     telemetry_watchdog_init(&telemetry_watchdog);
 
-    while ((opt = getopt(argc, argv, "hdp:P:R:45j:Hi:xakw:")) != -1) {
+    while ((opt = getopt(argc, argv, "hdp:P:R:D:45j:Hi:xakw:")) != -1) {
         switch (opt) {
         case 'p': osd_port    = atoi(optarg); break;
         case 'P': rtp_port    = atoi(optarg); break;
         case 'R': input_url   = strdup(optarg); break;
+        case 'D': apply_disable_list(optarg); break;
         case '4': codec       = "h264"; break;
         case '5': codec       = "h265"; break;
         case 'j': rtp_jitter  = atoi(optarg); break;
@@ -153,16 +300,17 @@ static int osd_main(int argc, char **argv)
         default:
         show_usage:
 #ifdef __GST_OPENGL__
-            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [ -R input_url ] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-w screen_width] \n", argv[0]);
+            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [ -R input_url ] [-D disable_items] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-w screen_width] \n", argv[0]);
             fprintf(stderr, "Default: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, screen_width=%d\n",
                     osd_port, rtp_port,
                     input_url != NULL ? input_url : "none",
                     codec, rtp_jitter, heartbeat_tx_enabled, heartbeat_tx_interval_ms, screen_width);
 #else
-            fprintf(stderr, "%s [-p mavlink_port] [-H] [-i heartbeat_ms]\n", argv[0]);
+            fprintf(stderr, "%s [-p mavlink_port] [-D disable_items] [-H] [-i heartbeat_ms]\n", argv[0]);
             fprintf(stderr, "Default: mavlink_port=%d, heartbeat_tx=%d, heartbeat_ms=%d\n",
                     osd_port, heartbeat_tx_enabled, heartbeat_tx_interval_ms);
 #endif
+            fprintf(stderr, "Disable groups/items examples: -D gps,wfb  |  -D wfb_state  |  -D gps_status,gps_coords\n");
             fprintf(stderr, "WFB-ng OSD version " WFB_OSD_VERSION "\n");
             fprintf(stderr, "WFB-ng home page: <http://wfb-ng.org>\n");
             exit(1);
