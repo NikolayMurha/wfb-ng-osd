@@ -5,7 +5,10 @@
       "Bash(bash -n /Users/nikolay/Projects/LegitForce/snipe/wfb-ng-osd/build_dist.sh)",
       "Bash(docker run:*)",
       "Bash(make clean:*)",
-      "Bash(make osd:*)"
+      "Bash(make osd:*)",
+      "Bash(make mode=gst appsrc.o)",
+      "Bash(make mode=gst)",
+      "Bash(make mode=gst osd.gst)"
     ]
   }
 }

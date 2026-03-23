@@ -1313,7 +1313,7 @@ void draw_warning(void) {
   }
 
   // no home yet
-  if (osd_got_home == 0) {
+  if (osd_params.Alarm_GPS_status_en == 1 && osd_got_home == 0) {
     haswarn = true;
     warning[6] = 1;
   }

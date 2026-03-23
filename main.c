@@ -154,6 +154,7 @@ static int disable_single_item(const char *name)
 {
     if (strcasecmp(name, "gps_status") == 0 || strcasecmp(name, "GpsStatus_en") == 0) {
         osd_params.GpsStatus_en = 0;
+        osd_params.Alarm_GPS_status_en = 0;
         return 1;
     }
     if (strcasecmp(name, "gps_coords") == 0 || strcasecmp(name, "gps_latlon") == 0) {
