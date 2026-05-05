@@ -227,6 +227,7 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
             osd_message_queue_tail = (osd_message_queue_tail + 1) % OSD_MAX_MESSAGES;
             osd_message_t *item = osd_message_queue + osd_message_queue_tail;
             item->severity = mavlink_msg_statustext_get_severity(&msg);
+            item->received_time_ms = GetSystimeMS();
             mavlink_msg_statustext_get_text(&msg, item->message);
             item->message[sizeof(item->message) - 1] = '\0';
             printf("Message: %s\n", item->message);

@@ -62,6 +62,8 @@ Optional OSD element disable via CLI:
   * groups: `gps`, `wfb`
   * items: `wfb_state`, `wfb_alarm`, `gps_status`, `gps_coords`, `gps2`, `home`, `cwh`, `warnings`
   * examples: `-D gps,wfb`, `-D wfb_state`, `-D gps_status,gps_coords`
+Version output:
+  * `--version` prints build version including short git commit hash when built from repository
 
    * For `mode=gst`, run `./osd.gst`
    * You should got screen like this:

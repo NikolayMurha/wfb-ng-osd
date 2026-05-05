@@ -8,7 +8,8 @@
       "Bash(make osd:*)",
       "Bash(make mode=gst appsrc.o)",
       "Bash(make mode=gst)",
-      "Bash(make mode=gst osd.gst)"
+      "Bash(make mode=gst osd.gst)",
+      "Bash(make)"
     ]
   }
 }

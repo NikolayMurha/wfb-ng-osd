@@ -190,12 +190,19 @@ void draw_osd_messages()
     int i = 0;
     int p = (osd_message_queue_tail + 1) % OSD_MAX_MESSAGES;
     int p_start = p;
+    uint64_t now = GetSystimeMS();
 
     do
     {
         osd_message_t *item = osd_message_queue + p;
         if(item->message[0])
         {
+            if (now - item->received_time_ms >= OSD_MESSAGE_TTL_MS) {
+                item->message[0] = '\0';
+                p = (p + 1) % OSD_MAX_MESSAGES;
+                continue;
+            }
+
             snprintf(tmp_str, sizeof(tmp_str), "%s", item->message);
             write_string(tmp_str, x, y + 12 * i, 0, 0, TEXT_VA_TOP, TEXT_HA_LEFT, 0, SIZE_TO_FONT[0]);
             i += 1;

@@ -149,10 +149,12 @@ typedef struct WAYPOINT_TYP {
 extern WAYPOINT wp_list[MAX_WAYPOINTS];
 
 #define OSD_MAX_MESSAGES 6
+#define OSD_MESSAGE_TTL_MS 5000ULL
 
 typedef struct
 {
     uint8_t severity;
+    uint64_t received_time_ms;
     char message[51];
 } osd_message_t;
 

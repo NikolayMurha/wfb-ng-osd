@@ -35,6 +35,8 @@ endif
 export VERSION COMMIT SOURCE_DATE_EPOCH
 export OSD_MODE=$(mode)
 
+.DEFAULT_GOAL := all
+
 $(ENV):
 	$(PYTHON) -m virtualenv --download $(ENV)
 	$$(PATH=$(ENV)/bin:$(ENV)/local/bin:$(PATH) which python3) -m pip install --upgrade pip setuptools $(STDEB)
