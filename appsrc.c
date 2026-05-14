@@ -20,9 +20,8 @@
 #define _GNU_SOURCE
 
 #include <gst/gst.h>
+#include <gst/app/gstappsrc.h>
 #include <gst/video/video.h>
-#include <gst/video/gstvideometa.h>
-#include <gst/video/video-overlay-composition.h>
 #ifdef __GST_GTK__
 #include <gtk/gtk.h>
 #endif
@@ -38,11 +37,6 @@
 
 // For gstreamer < 1.18
 GstClockTime gst_element_get_current_running_time (GstElement * element);
-
-typedef struct {
-    int screen_width;
-    int screen_height;
-} osd_probe_data_t;
 
 
 static gboolean
@@ -98,81 +92,40 @@ on_message (GstBus * bus, GstMessage * message, gpointer user_data)
 }
 
 /*
- * Pad probe — викликається для кожного відео-кадру.
- * Рендерить OSD у RGBA-буфер та прикріплює його як
- * GstVideoOverlayCompositionMeta. gloverlaycompositor
- * накладає overlay на GPU без жодної синхронізації потоків.
+ * Callback need-data appsrc'а — викликається GStreamer'ом коли OSD-stream
+ * потребує наступного кадру. Рендеримо OSD у RGBA-буфер та пушимо в pipeline.
+ * Mixer (glvideomixerelement) композитує цей кадр поверх відео.
+ *
+ * Це upstream-style архітектура (svpcom/wfb-ng-osd). На відміну від
+ * gloverlaycompositor + pad probe, мікшер достовірно показує overlay
+ * незалежно від GL/CPU sink chain.
  */
-static GstPadProbeReturn
-osd_meta_probe (GstPad *pad, GstPadProbeInfo *info, gpointer user_data)
+static void cb_need_data (GstElement *appsrc, guint unused_size, gpointer user_data)
 {
-    osd_probe_data_t *data = (osd_probe_data_t *)user_data;
+    GMainLoop *loop = (GMainLoop *) user_data;
 
-    /* Забезпечуємо записуваність буфера для додавання метаданих */
-    GstBuffer *buf = gst_buffer_make_writable(GST_PAD_PROBE_INFO_BUFFER(info));
-    GST_PAD_PROBE_INFO_DATA(info) = buf;
-
-    /* Рендеримо OSD → RGBA GstBuffer 640x360 */
     pthread_mutex_lock(&video_mutex);
-    GstBuffer *osd_buf = render();
+    GstBuffer *buffer = render();
     pthread_mutex_unlock(&video_mutex);
 
-    /*
-     * gst_video_overlay_rectangle_new_raw вимагає формат BGRA
-     * (GST_VIDEO_OVERLAY_COMPOSITION_FORMAT_RGB).
-     * graphengine пише пікселі як RGBA, тому переставляємо R↔B.
-     */
-    {
-        GstMapInfo m;
-        gst_buffer_map(osd_buf, &m, GST_MAP_READWRITE);
-        uint32_t *px = (uint32_t *)m.data;
-        int n = GRAPHICS_WIDTH * GRAPHICS_HEIGHT;
-        for (int i = 0; i < n; i++) {
-            uint32_t p = px[i];
-            /* RGBA LE: 0xAABBGGRR → swap R↔B → BGRA LE: 0xAARRGGBB */
-            px[i] = (p & 0xFF00FF00u)
-                  | ((p & 0x000000FFu) << 16)
-                  | ((p & 0x00FF0000u) >> 16);
-        }
-        gst_buffer_unmap(osd_buf, &m);
+    GstClockTime pts = gst_element_get_current_running_time(appsrc);
+    /* Якщо clock ще не готовий — використовуємо 0, але не пропускаємо буфер.
+     * appsrc повинен завжди пушити, інакше mixer почне виводити відео без OSD. */
+    GST_BUFFER_PTS (buffer) = GST_CLOCK_TIME_IS_VALID(pts) ? pts : 0;
+
+    /* Min supported fps; низьке значення збільшує latency.
+     * Якщо fps нижче ніж selected — CPU usage сильно зростає. */
+    GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale_int (1, GST_SECOND, 30);
+    GST_BUFFER_FLAG_SET(buffer, GST_BUFFER_FLAG_LIVE);
+    GST_BUFFER_FLAG_SET(buffer, GST_BUFFER_FLAG_DROPPABLE);
+
+    GstFlowReturn ret;
+    g_signal_emit_by_name (appsrc, "push-buffer", buffer, &ret);
+    gst_buffer_unref (buffer);
+
+    if (ret != GST_FLOW_OK) {
+        g_main_loop_quit (loop);
     }
-
-    /* Прикріплюємо відео-мета щоб gloverlaycompositor знав формат */
-    gst_buffer_add_video_meta(osd_buf,
-                              GST_VIDEO_FRAME_FLAG_NONE,
-                              GST_VIDEO_FORMAT_BGRA,
-                              GRAPHICS_WIDTH, GRAPHICS_HEIGHT);
-
-    /* Беремо реальні розміри відео-кадру з caps паду */
-    guint render_w = (guint)data->screen_width;
-    guint render_h = (guint)data->screen_height;
-    {
-        GstCaps *caps = gst_pad_get_current_caps(pad);
-        if (caps) {
-            GstVideoInfo vinfo;
-            if (gst_video_info_from_caps(&vinfo, caps)) {
-                render_w = (guint)GST_VIDEO_INFO_WIDTH(&vinfo);
-                render_h = (guint)GST_VIDEO_INFO_HEIGHT(&vinfo);
-            }
-            gst_caps_unref(caps);
-        }
-    }
-
-    /* Прямокутник overlay масштабується на розмір відео-кадру */
-    GstVideoOverlayRectangle *rect = gst_video_overlay_rectangle_new_raw(
-        osd_buf,
-        0, 0,
-        render_w, render_h,
-        GST_VIDEO_OVERLAY_FORMAT_FLAG_NONE);
-    gst_buffer_unref(osd_buf);
-
-    GstVideoOverlayComposition *comp = gst_video_overlay_composition_new(rect);
-    gst_video_overlay_rectangle_unref(rect);
-
-    gst_buffer_add_video_overlay_composition_meta(buf, comp);
-    gst_video_overlay_composition_unref(comp);
-
-    return GST_PAD_PROBE_OK;
 }
 
 
@@ -189,6 +142,11 @@ static gboolean is_safe_sink_name(const char *video_sink)
     return TRUE;
 }
 
+/*
+ * Будує "sink chain" — частину pipeline після glvideomixer.
+ * Mixer виводить GL-буфери, тож для CPU-sinks потрібен glcolorconvert ! gldownload.
+ * glimagesink приймає GL напряму.
+ */
 static char* build_sink_pipeline_for_name(const char *video_sink)
 {
     if (!is_safe_sink_name(video_sink)) {
@@ -357,14 +315,27 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
         }
 
         /*
-         * Нова архітектура без mixer:
-         *   відео → queue → identity(osd_probe) → glupload → glcolorconvert
-         *         → gloverlaycompositor → sink
+         * Upstream-style архітектура з glvideomixer + appsrc:
+         *   відео → decoder → queue → glupload → glcolorconvert → mixer.sink_0
+         *   appsrc(OSD RGBA) → glupload → glcolorconvert → mixer.sink_1
+         *   mixer → sink_chain (glimagesink/gtksink/...)
          *
-         * Pad probe на identity прикріплює GstVideoOverlayCompositionMeta
-         * до кожного відео-кадру. gloverlaycompositor накладає OSD на GPU
-         * без синхронізації двох потоків — затримка як у чистого gst.
+         * Це надійніше за gloverlaycompositor+pad probe (попередня архітектура у форку),
+         * де meta могла губитися при upload'і у GL пам'ять — overlay не показувався.
+         *
+         * sink_0 (відео) z=-2, sink_1 (OSD) z=0 — OSD поверх відео.
          */
+        const char *mixer_chain =
+            "glvideomixerelement emit-signals=true start-time-selection=1 name=osd_mixer "
+            "sink_0::emit-signals=true sink_0::width=%d sink_0::height=%d sink_0::zorder=-2 "
+            "sink_1::emit-signals=true sink_1::width=%d sink_1::height=%d sink_1::zorder=0 "
+            "! %s sync=false ";
+
+        const char *osd_branch =
+            "appsrc name=osd_src stream-type=0 format=time min-latency=0 ! "
+            "video/x-raw,format=RGBA,width=%d,height=%d,framerate=0/1 ! "
+            "glupload ! glcolorconvert ! osd_mixer.";
+
         if (is_srt_source)
         {
             asprintf(&pipeline_str,
@@ -373,12 +344,15 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                      "%sparse config-interval=1 disable-passthrough=true ! "
                      "%s qos=false ! "
                      "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
-                     "identity name=osd_probe ! "
                      "glupload ! glcolorconvert ! "
-                     "gloverlaycompositor ! "
-                     "%s sync=false",
+                     "%s "
+                     "%s",
                      src_str, codec, decoder,
-                     sink_str);
+                     g_strdup_printf(mixer_chain,
+                                     screen_width, screen_height,
+                                     screen_width, screen_height,
+                                     sink_str),
+                     g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT));
         }
         else if (is_generic_uri_source)
         {
@@ -386,12 +360,15 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                      "%s "
                      "uri_src. ! "
                      "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
-                     "identity name=osd_probe ! "
                      "glupload ! glcolorconvert ! "
-                     "gloverlaycompositor ! "
-                     "%s sync=false",
+                     "%s "
+                     "%s",
                      src_str,
-                     sink_str);
+                     g_strdup_printf(mixer_chain,
+                                     screen_width, screen_height,
+                                     screen_width, screen_height,
+                                     sink_str),
+                     g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT));
         }
         else
         {
@@ -401,12 +378,15 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                      "%sparse config-interval=1 disable-passthrough=true ! "
                      "%s qos=false ! "
                      "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
-                     "identity name=osd_probe ! "
                      "glupload ! glcolorconvert ! "
-                     "gloverlaycompositor ! "
-                     "%s sync=false",
+                     "%s "
+                     "%s",
                      src_str, codec, codec, decoder,
-                     sink_str);
+                     g_strdup_printf(mixer_chain,
+                                     screen_width, screen_height,
+                                     screen_width, screen_height,
+                                     sink_str),
+                     g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT));
         }
 
         free(sink_str);
@@ -429,23 +409,11 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
 
     g_assert(pipeline);
 
-    /* Встановлюємо pad probe на identity елемент */
+    /* Connect appsrc need-data signal — pushes OSD frames into mixer.sink_1 */
     {
-        GstElement *osd_probe_elem = gst_bin_get_by_name(GST_BIN(pipeline), "osd_probe");
-        GstPad *src_pad = gst_element_get_static_pad(osd_probe_elem, "src");
-
-        osd_probe_data_t *probe_data = g_new0(osd_probe_data_t, 1);
-        probe_data->screen_width  = screen_width;
-        probe_data->screen_height = screen_height;
-
-        gst_pad_add_probe(src_pad,
-                          GST_PAD_PROBE_TYPE_BUFFER,
-                          osd_meta_probe,
-                          probe_data,
-                          g_free);
-
-        gst_object_unref(src_pad);
-        gst_object_unref(osd_probe_elem);
+        GstElement *appsrc = gst_bin_get_by_name(GST_BIN(pipeline), "osd_src");
+        g_signal_connect (appsrc, "need-data", G_CALLBACK (cb_need_data), loop);
+        gst_object_unref(appsrc);
     }
 
     // Set message handler
