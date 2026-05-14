@@ -275,7 +275,7 @@ static int osd_main(int argc, char **argv)
 
     telemetry_watchdog_init(&telemetry_watchdog);
 
-    while ((opt = getopt(argc, argv, "hdp:P:R:D:45j:Hi:xakw:")) != -1) {
+    while ((opt = getopt(argc, argv, "hdp:P:R:D:45j:Hi:xakgw:")) != -1) {
         switch (opt) {
         case 'p': osd_port    = atoi(optarg); break;
         case 'P': rtp_port    = atoi(optarg); break;
@@ -295,13 +295,14 @@ static int osd_main(int argc, char **argv)
         case 'x': osd_render  = OSD_RENDER_XV; break;
         case 'a': osd_render  = OSD_RENDER_AUTO; break;
         case 'k': osd_render  = OSD_RENDER_KMS; break;
+        case 'g': osd_render  = OSD_RENDER_GTK; break;
         case 'w': screen_width = atoi(optarg); break;
         case 'd': osd_debug   = 1; break;
         case 'h':
         default:
         show_usage:
 #ifdef __GST_OPENGL__
-            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [ -R input_url ] [-D disable_items] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-w screen_width] \n", argv[0]);
+            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [ -R input_url ] [-D disable_items] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-k] [-g] [-w screen_width] \n", argv[0]);
             fprintf(stderr, "Default: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, screen_width=%d\n",
                     osd_port, rtp_port,
                     input_url != NULL ? input_url : "none",

@@ -46,6 +46,10 @@ CFLAGS += -DWFB_OSD_VERSION='"$(VERSION)-$(shell /bin/bash -c '_tmp=$(COMMIT); e
 ifeq ($(mode), gst)
     CFLAGS += -Wall -pthread -std=gnu99 -D__GST_OPENGL__ -fPIC $(shell pkg-config --cflags glib-2.0) $(shell pkg-config --cflags gstreamer-1.0)
     LDFLAGS += $(shell pkg-config --libs glib-2.0) $(shell pkg-config --libs gstreamer-1.0) $(shell pkg-config --libs gstreamer-video-1.0) -lgstapp-1.0 -lpthread $(RT_LIB) -lm
+    ifeq ($(gtk), 1)
+        CFLAGS += -D__GST_GTK__ $(shell pkg-config --cflags gtk+-3.0)
+        LDFLAGS += $(shell pkg-config --libs gtk+-3.0)
+    endif
     OBJS = main.o osdrender.o osdmavlink.o graphengine.o UAVObj.o m2dlib.o math3d.o osdconfig.o osdvar.o fonts.o font_outlined8x14.o font_outlined8x8.o appsrc.o gst-compat.o
 else ifeq ($(mode), rockchip)
     CFLAGS += -Wall -pthread -std=gnu99 -D__DRM_ROCKCHIP__ -fPIC $(shell pkg-config --cflags libdrm)

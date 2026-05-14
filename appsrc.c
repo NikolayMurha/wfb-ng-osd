@@ -23,6 +23,9 @@
 #include <gst/video/video.h>
 #include <gst/video/gstvideometa.h>
 #include <gst/video/video-overlay-composition.h>
+#ifdef __GST_GTK__
+#include <gtk/gtk.h>
+#endif
 
 #include <stdint.h>
 #include <pthread.h>
@@ -195,6 +198,13 @@ static const char* select_osd_render(osd_render_t osd_render)
         return osd_debug ? \
             "glcolorconvert ! gldownload ! clockoverlay text=Auto valignment=center ! autovideosink" : \
             "glcolorconvert ! gldownload ! autovideosink";
+
+#ifdef __GST_GTK__
+    case OSD_RENDER_GTK:
+        return osd_debug ? \
+            "glcolorconvert ! gldownload ! clockoverlay text=GTK valignment=center ! gtksink name=gtk_sink" : \
+            "glcolorconvert ! gldownload ! gtksink name=gtk_sink";
+#endif
     }
 }
 
@@ -206,6 +216,11 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
     // EGL is Linux-centric; on macOS let GStreamer select the native GL backend.
 #ifdef __linux__
     setenv("GST_GL_PLATFORM", "egl", 0);
+#endif
+
+#ifdef __GST_GTK__
+    if (osd_render == OSD_RENDER_GTK)
+        gtk_init(NULL, NULL);
 #endif
 
     /* init GStreamer */
@@ -389,6 +404,24 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
 
     // main loop
     gst_element_set_state (pipeline, GST_STATE_PLAYING);
+
+#ifdef __GST_GTK__
+    if (osd_render == OSD_RENDER_GTK) {
+        GstElement *gtk_sink = gst_bin_get_by_name(GST_BIN(pipeline), "gtk_sink");
+        GtkWidget *video_widget;
+        g_object_get(gtk_sink, "widget", &video_widget, NULL);
+        gst_object_unref(gtk_sink);
+
+        GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+        gtk_window_set_title(GTK_WINDOW(window), "WFB-ng OSD");
+        gtk_window_set_default_size(GTK_WINDOW(window), screen_width, screen_height);
+        g_signal_connect_swapped(window, "destroy", G_CALLBACK(g_main_loop_quit), loop);
+        gtk_container_add(GTK_CONTAINER(window), video_widget);
+        g_object_unref(video_widget);
+        gtk_widget_show_all(window);
+    }
+#endif
+
     g_main_loop_run (loop);
     gst_element_set_state (pipeline, GST_STATE_NULL);
 

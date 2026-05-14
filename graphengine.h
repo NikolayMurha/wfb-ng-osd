@@ -12,6 +12,7 @@ typedef enum
     OSD_RENDER_XV,
     OSD_RENDER_GL,
     OSD_RENDER_KMS,
+    OSD_RENDER_GTK,
 } osd_render_t;
 
 // Size of an array (num items.)
