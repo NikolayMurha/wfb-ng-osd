@@ -30,6 +30,8 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <glib.h>
 
 #include "graphengine.h"
@@ -174,42 +176,92 @@ osd_meta_probe (GstPad *pad, GstPadProbeInfo *info, gpointer user_data)
 }
 
 
-static const char* select_osd_render(osd_render_t osd_render)
+static gboolean is_safe_sink_name(const char *video_sink)
 {
+    if (video_sink == NULL || video_sink[0] == '\0')
+        return FALSE;
+
+    for (const char *p = video_sink; *p != '\0'; p++) {
+        if (!g_ascii_isalnum(*p) && *p != '_' && *p != '-')
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+static char* build_sink_pipeline_for_name(const char *video_sink)
+{
+    if (!is_safe_sink_name(video_sink)) {
+        fprintf(stderr, "Invalid video sink name: %s\n", video_sink != NULL ? video_sink : "(null)");
+        exit(1);
+    }
+
+    if (g_strcmp0(video_sink, "glimagesink") == 0) {
+        return osd_debug ? \
+            strdup("clockoverlay text=glimagesink valignment=center ! glimagesink") : \
+            strdup("glimagesink");
+    }
+
+#ifdef __GST_GTK__
+    if (g_strcmp0(video_sink, "gtksink") == 0) {
+        return osd_debug ? \
+            strdup("glcolorconvert ! gldownload ! clockoverlay text=gtksink valignment=center ! gtksink name=gtk_sink") : \
+            strdup("glcolorconvert ! gldownload ! gtksink name=gtk_sink");
+    }
+#endif
+
+    char *pipeline = NULL;
+    if (osd_debug) {
+        asprintf(&pipeline,
+                 "glcolorconvert ! gldownload ! clockoverlay text=%s valignment=center ! %s",
+                 video_sink, video_sink);
+    } else {
+        asprintf(&pipeline,
+                 "glcolorconvert ! gldownload ! %s",
+                 video_sink);
+    }
+    return pipeline;
+}
+
+static char* select_osd_render(osd_render_t osd_render, const char *video_sink)
+{
+    if (video_sink != NULL && video_sink[0] != '\0')
+        return build_sink_pipeline_for_name(video_sink);
+
     switch(osd_render)
     {
     case OSD_RENDER_XV:
         return osd_debug ? \
-            "glcolorconvert ! gldownload ! clockoverlay text=XV valignment=center ! xvimagesink" : \
-            "glcolorconvert ! gldownload ! xvimagesink";
+            strdup("glcolorconvert ! gldownload ! clockoverlay text=XV valignment=center ! xvimagesink") : \
+            strdup("glcolorconvert ! gldownload ! xvimagesink");
 
     case OSD_RENDER_GL:
         return osd_debug ? \
-            "clockoverlay text=GL valignment=center ! glimagesink" : \
-            "glimagesink";
+            strdup("clockoverlay text=GL valignment=center ! glimagesink") : \
+            strdup("glimagesink");
 
     case OSD_RENDER_KMS:
         return osd_debug ? \
-            "glcolorconvert ! gldownload ! clockoverlay text=Auto valignment=center ! kmssink" : \
-            "glcolorconvert ! gldownload ! kmssink";
+            strdup("glcolorconvert ! gldownload ! clockoverlay text=KMS valignment=center ! kmssink") : \
+            strdup("glcolorconvert ! gldownload ! kmssink");
 
     case OSD_RENDER_AUTO:
     default:
         return osd_debug ? \
-            "glcolorconvert ! gldownload ! clockoverlay text=Auto valignment=center ! autovideosink" : \
-            "glcolorconvert ! gldownload ! autovideosink";
+            strdup("glcolorconvert ! gldownload ! clockoverlay text=Auto valignment=center ! autovideosink") : \
+            strdup("glcolorconvert ! gldownload ! autovideosink");
 
 #ifdef __GST_GTK__
     case OSD_RENDER_GTK:
         return osd_debug ? \
-            "glcolorconvert ! gldownload ! clockoverlay text=GTK valignment=center ! gtksink name=gtk_sink" : \
-            "glcolorconvert ! gldownload ! gtksink name=gtk_sink";
+            strdup("glcolorconvert ! gldownload ! clockoverlay text=GTK valignment=center ! gtksink name=gtk_sink") : \
+            strdup("glcolorconvert ! gldownload ! gtksink name=gtk_sink");
 #endif
     }
 }
 
 
-int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url)
+int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url, char *video_sink)
 {
     int screen_height = screen_width * 9 / 16;
 
@@ -219,7 +271,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
 #endif
 
 #ifdef __GST_GTK__
-    if (osd_render == OSD_RENDER_GTK)
+    if (osd_render == OSD_RENDER_GTK || g_strcmp0(video_sink, "gtksink") == 0)
         gtk_init(NULL, NULL);
 #endif
 
@@ -236,6 +288,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
         GError *error = NULL;
         gboolean is_srt_source = FALSE;
         gboolean is_generic_uri_source = FALSE;
+        char *sink_str = select_osd_render(osd_render, video_sink);
 
         if (input_url != NULL && g_str_has_prefix(input_url, "srt://"))
         {
@@ -325,7 +378,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                      "gloverlaycompositor ! "
                      "%s sync=false",
                      src_str, codec, decoder,
-                     select_osd_render(osd_render));
+                     sink_str);
         }
         else if (is_generic_uri_source)
         {
@@ -338,7 +391,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                      "gloverlaycompositor ! "
                      "%s sync=false",
                      src_str,
-                     select_osd_render(osd_render));
+                     sink_str);
         }
         else
         {
@@ -353,9 +406,10 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                      "gloverlaycompositor ! "
                      "%s sync=false",
                      src_str, codec, codec, decoder,
-                     select_osd_render(osd_render));
+                     sink_str);
         }
 
+        free(sink_str);
         free(src_str);
         if (decoder != NULL)
             free(decoder);
@@ -411,7 +465,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
      *   - "GTK+ Cairo Renderer" (gtksink default, з відео)
      * Готуємо widget і вкладаємо в наше вікно до того, як sink стартує.
      */
-    if (osd_render == OSD_RENDER_GTK) {
+    if (osd_render == OSD_RENDER_GTK || g_strcmp0(video_sink, "gtksink") == 0) {
         GstElement *gtk_sink = gst_bin_get_by_name(GST_BIN(pipeline), "gtk_sink");
         GtkWidget *video_widget;
         g_object_get(gtk_sink, "widget", &video_widget, NULL);

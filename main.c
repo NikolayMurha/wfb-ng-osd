@@ -46,7 +46,7 @@
 
 
 #ifdef __GST_OPENGL__
-int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url);
+int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url, char *video_sink);
 #ifdef __APPLE__
 #include <gst/gstmacos.h>
 #endif
@@ -58,12 +58,13 @@ typedef struct {
     osd_render_t osd_render;
     int screen_width;
     char *input_url;
+    char *video_sink;
 } gst_thread_args_t;
 
 static void *gst_thread_start(void *arg)
 {
     gst_thread_args_t *args = (gst_thread_args_t *)arg;
-    gst_main(args->rtp_port, args->codec, args->rtp_jitter, args->osd_render, args->screen_width, args->input_url);
+    gst_main(args->rtp_port, args->codec, args->rtp_jitter, args->osd_render, args->screen_width, args->input_url, args->video_sink);
     fprintf(stderr, "gst thread exited\n");
     exit(1);
 }
@@ -263,6 +264,7 @@ static int osd_main(int argc, char **argv)
 #endif
     int screen_width = 1920;
     char *input_url = NULL;
+    char *video_sink = NULL;
 
     uint8_t buf[65536];
     int fd;
@@ -275,7 +277,7 @@ static int osd_main(int argc, char **argv)
 
     telemetry_watchdog_init(&telemetry_watchdog);
 
-    while ((opt = getopt(argc, argv, "hdp:P:R:D:45j:Hi:xakgw:")) != -1) {
+    while ((opt = getopt(argc, argv, "hdp:P:R:D:45j:Hi:xakgs:w:")) != -1) {
         switch (opt) {
         case 'p': osd_port    = atoi(optarg); break;
         case 'P': rtp_port    = atoi(optarg); break;
@@ -296,13 +298,14 @@ static int osd_main(int argc, char **argv)
         case 'a': osd_render  = OSD_RENDER_AUTO; break;
         case 'k': osd_render  = OSD_RENDER_KMS; break;
         case 'g': osd_render  = OSD_RENDER_GTK; break;
+        case 's': video_sink  = strdup(optarg); break;
         case 'w': screen_width = atoi(optarg); break;
         case 'd': osd_debug   = 1; break;
         case 'h':
         default:
         show_usage:
 #ifdef __GST_OPENGL__
-            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [ -R input_url ] [-D disable_items] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-k] [-g] [-w screen_width] \n", argv[0]);
+            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [ -R input_url ] [-D disable_items] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-k] [-g] [-s video_sink] [-w screen_width] \n", argv[0]);
             fprintf(stderr, "Default: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, screen_width=%d\n",
                     osd_port, rtp_port,
                     input_url != NULL ? input_url : "none",
@@ -325,10 +328,11 @@ static int osd_main(int argc, char **argv)
     telemetry_watchdog_set_heartbeat_tx(&telemetry_watchdog, heartbeat_tx_enabled, (uint32_t)heartbeat_tx_interval_ms);
 
 #ifdef __GST_OPENGL__
-    printf("Use: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, osd_render=%d, screen_width=%d\n",
+    printf("Use: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, osd_render=%d, video_sink=%s, screen_width=%d\n",
            osd_port, rtp_port,
            input_url != NULL ? input_url : "none",
-           codec, rtp_jitter, heartbeat_tx_enabled, heartbeat_tx_interval_ms, osd_render, screen_width);
+           codec, rtp_jitter, heartbeat_tx_enabled, heartbeat_tx_interval_ms, osd_render,
+           video_sink != NULL ? video_sink : "none", screen_width);
 
     osd_init(0, 0, 1, 1);
     fd = open_udp_socket_for_rx(osd_port);
@@ -340,6 +344,7 @@ static int osd_main(int argc, char **argv)
         .osd_render = osd_render,
         .screen_width = screen_width,
         .input_url  = input_url,
+        .video_sink  = video_sink,
     };
 
     pthread_t tid;
