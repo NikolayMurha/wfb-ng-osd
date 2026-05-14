@@ -402,10 +402,15 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
         gst_object_unref (GST_OBJECT (bus));
     }
 
-    // main loop
-    gst_element_set_state (pipeline, GST_STATE_PLAYING);
-
 #ifdef __GST_GTK__
+    /*
+     * Важливо: GTK window треба налаштувати ПЕРЕД gst_element_set_state(PLAYING).
+     * Інакше gtksink при переході в PLAYING створює свій default top-level
+     * GtkWindow з title "GTK+ Cairo Renderer", і ми отримуємо ДВА вікна:
+     *   - "WFB-ng OSD" (наше, порожнє)
+     *   - "GTK+ Cairo Renderer" (gtksink default, з відео)
+     * Готуємо widget і вкладаємо в наше вікно до того, як sink стартує.
+     */
     if (osd_render == OSD_RENDER_GTK) {
         GstElement *gtk_sink = gst_bin_get_by_name(GST_BIN(pipeline), "gtk_sink");
         GtkWidget *video_widget;
@@ -421,6 +426,9 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
         gtk_widget_show_all(window);
     }
 #endif
+
+    // main loop
+    gst_element_set_state (pipeline, GST_STATE_PLAYING);
 
     g_main_loop_run (loop);
     gst_element_set_state (pipeline, GST_STATE_NULL);
