@@ -157,7 +157,8 @@ static gboolean is_safe_dvr_path(const char *path)
 }
 
 static char* build_dvr_sink_chain(osd_render_t osd_render, const char *video_sink,
-                                   const char *dvr_path, int dvr_segment_secs)
+                                   const char *dvr_path, int dvr_segment_secs,
+                                   int dvr_bitrate, const char *dvr_preset)
 {
     /* Визначаємо display sink (CPU-side, без gldownload — він вже є у спільній частині) */
     const char *display_part;
@@ -199,11 +200,11 @@ static char* build_dvr_sink_chain(osd_render_t osd_render, const char *video_sin
              "%s%s "
              "dvr_tee. ! queue leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
              "videoconvert ! "
-             "x264enc tune=zerolatency speed-preset=ultrafast ! "
+             "x264enc tune=zerolatency speed-preset=%s bitrate=%d key-int-max=60 ! "
              "h264parse ! "
              "splitmuxsink name=dvr_sink location=\"%s\" max-size-time=%" G_GUINT64_FORMAT " muxer=mpegtsmux",
              debug_overlay, display_part,
-             dvr_path, max_time_ns);
+             dvr_preset, dvr_bitrate, dvr_path, max_time_ns);
 
     return result;
 }
@@ -222,26 +223,26 @@ static char* build_sink_pipeline_for_name(const char *video_sink)
 
     if (g_strcmp0(video_sink, "glimagesink") == 0) {
         return osd_debug ? \
-            strdup("clockoverlay text=glimagesink valignment=center ! glimagesink") : \
-            strdup("glimagesink");
+            strdup("clockoverlay text=glimagesink valignment=center ! glimagesink sync=false") : \
+            strdup("glimagesink sync=false");
     }
 
 #ifdef __GST_GTK__
     if (g_strcmp0(video_sink, "gtksink") == 0) {
         return osd_debug ? \
-            strdup("glcolorconvert ! gldownload ! clockoverlay text=gtksink valignment=center ! gtksink name=gtk_sink") : \
-            strdup("glcolorconvert ! gldownload ! gtksink name=gtk_sink");
+            strdup("glcolorconvert ! gldownload ! clockoverlay text=gtksink valignment=center ! gtksink name=gtk_sink sync=false") : \
+            strdup("glcolorconvert ! gldownload ! gtksink name=gtk_sink sync=false");
     }
 #endif
 
     char *pipeline = NULL;
     if (osd_debug) {
         asprintf(&pipeline,
-                 "glcolorconvert ! gldownload ! clockoverlay text=%s valignment=center ! %s",
+                 "glcolorconvert ! gldownload ! clockoverlay text=%s valignment=center ! %s sync=false",
                  video_sink, video_sink);
     } else {
         asprintf(&pipeline,
-                 "glcolorconvert ! gldownload ! %s",
+                 "glcolorconvert ! gldownload ! %s sync=false",
                  video_sink);
     }
     return pipeline;
@@ -256,42 +257,80 @@ static char* select_osd_render(osd_render_t osd_render, const char *video_sink)
     {
     case OSD_RENDER_XV:
         return osd_debug ? \
-            strdup("glcolorconvert ! gldownload ! clockoverlay text=XV valignment=center ! xvimagesink") : \
-            strdup("glcolorconvert ! gldownload ! xvimagesink");
+            strdup("glcolorconvert ! gldownload ! clockoverlay text=XV valignment=center ! xvimagesink sync=false") : \
+            strdup("glcolorconvert ! gldownload ! xvimagesink sync=false");
 
     case OSD_RENDER_GL:
         return osd_debug ? \
-            strdup("clockoverlay text=GL valignment=center ! glimagesink") : \
-            strdup("glimagesink");
+            strdup("clockoverlay text=GL valignment=center ! glimagesink sync=false") : \
+            strdup("glimagesink sync=false");
 
     case OSD_RENDER_KMS:
         return osd_debug ? \
-            strdup("glcolorconvert ! gldownload ! clockoverlay text=KMS valignment=center ! kmssink") : \
-            strdup("glcolorconvert ! gldownload ! kmssink");
+            strdup("glcolorconvert ! gldownload ! clockoverlay text=KMS valignment=center ! kmssink sync=false") : \
+            strdup("glcolorconvert ! gldownload ! kmssink sync=false");
 
     case OSD_RENDER_AUTO:
     default:
         return osd_debug ? \
-            strdup("glcolorconvert ! gldownload ! clockoverlay text=Auto valignment=center ! autovideosink") : \
-            strdup("glcolorconvert ! gldownload ! autovideosink");
+            strdup("glcolorconvert ! gldownload ! clockoverlay text=Auto valignment=center ! autovideosink sync=false") : \
+            strdup("glcolorconvert ! gldownload ! autovideosink sync=false");
 
 #ifdef __GST_GTK__
     case OSD_RENDER_GTK:
         return osd_debug ? \
-            strdup("glcolorconvert ! gldownload ! clockoverlay text=GTK valignment=center ! gtksink name=gtk_sink") : \
-            strdup("glcolorconvert ! gldownload ! gtksink name=gtk_sink");
+            strdup("glcolorconvert ! gldownload ! clockoverlay text=GTK valignment=center ! gtksink name=gtk_sink sync=false") : \
+            strdup("glcolorconvert ! gldownload ! gtksink name=gtk_sink sync=false");
 #endif
     }
 }
 
+static char* build_plain_output_chain(const char *plain_sink, const char *dvr_path,
+                                      int dvr_segment_secs, int dvr_bitrate,
+                                      const char *dvr_preset)
+{
+    char *result = NULL;
+
+    if (dvr_path == NULL) {
+        asprintf(&result, "videoconvert ! %s", plain_sink);
+        return result;
+    }
+
+    if (!is_safe_dvr_path(dvr_path)) {
+        fprintf(stderr, "DVR: недопустимий шлях: %s\n", dvr_path);
+        fprintf(stderr, "Дозволені символи: alnum / . - _ %%\n");
+        exit(1);
+    }
+
+    guint64 max_time_ns = (guint64)dvr_segment_secs * GST_SECOND;
+
+    asprintf(&result,
+             "videoconvert ! "
+             "tee name=plain_dvr_tee "
+             "plain_dvr_tee. ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+             "%s "
+             "plain_dvr_tee. ! queue leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+             "x264enc tune=zerolatency speed-preset=%s bitrate=%d key-int-max=60 ! "
+             "h264parse ! "
+             "splitmuxsink name=dvr_sink location=\"%s\" max-size-time=%" G_GUINT64_FORMAT " muxer=mpegtsmux",
+             plain_sink, dvr_preset, dvr_bitrate, dvr_path, max_time_ns);
+
+    return result;
+}
+
 
 static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
-                                   osd_render_t osd_render, char *input_url, char *video_sink)
+                                   osd_render_t osd_render, char *input_url, char *video_sink,
+                                   char *rtp_forward_host, int rtp_forward_port,
+                                   char *dvr_path, int dvr_segment_secs,
+                                   int dvr_bitrate, char *dvr_preset)
 {
     /* Простий плеєр без OSD: source → decoder → videoconvert → sink */
     char *src_str = NULL;
     char *decoder = NULL;
     char *pipeline_str = NULL;
+    char *forward_branch = NULL;
+    char *plain_output_chain = NULL;
     gboolean is_srt_source = FALSE;
     gboolean is_generic_uri_source = FALSE;
 
@@ -361,32 +400,87 @@ static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
         }
     }
 
+    if (rtp_forward_host != NULL && rtp_forward_port > 0) {
+        if (is_generic_uri_source) {
+            const char *encoder = g_strcmp0(codec, "h265") == 0 ?
+                "x265enc tune=zerolatency speed-preset=ultrafast" :
+                "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30";
+
+            asprintf(&forward_branch,
+                     "raw_tee. ! queue leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+                     "videoconvert ! %s ! %sparse config-interval=1 disable-passthrough=true ! "
+                     "rtp%spay config-interval=1 pt=96 ! "
+                     "udpsink host=\"%s\" port=%d sync=false async=false",
+                     encoder, codec, codec, rtp_forward_host, rtp_forward_port);
+        } else {
+            asprintf(&forward_branch,
+                     "encoded_tee. ! queue leaky=downstream max-size-buffers=16 max-size-bytes=0 max-size-time=0 ! "
+                     "rtp%spay config-interval=1 pt=96 ! "
+                     "udpsink host=\"%s\" port=%d sync=false async=false",
+                     codec, rtp_forward_host, rtp_forward_port);
+        }
+    }
+
+    plain_output_chain = build_plain_output_chain(plain_sink, dvr_path, dvr_segment_secs,
+                                                  dvr_bitrate, dvr_preset);
+
     if (is_srt_source) {
-        asprintf(&pipeline_str,
-                 "%s ! tsdemux ! %sparse config-interval=1 disable-passthrough=true ! "
-                 "%s qos=false ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
-                 "videoconvert ! %s",
-                 src_str, codec, decoder, plain_sink);
+        if (forward_branch != NULL) {
+            asprintf(&pipeline_str,
+                     "%s ! tsdemux ! %sparse config-interval=1 disable-passthrough=true ! "
+                     "tee name=encoded_tee "
+                     "encoded_tee. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                     "%s qos=false ! %s "
+                     "%s",
+                     src_str, codec, decoder, plain_output_chain, forward_branch);
+        } else {
+            asprintf(&pipeline_str,
+                     "%s ! tsdemux ! %sparse config-interval=1 disable-passthrough=true ! "
+                     "%s qos=false ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                     "%s",
+                     src_str, codec, decoder, plain_output_chain);
+        }
     } else if (is_generic_uri_source) {
-        asprintf(&pipeline_str,
-                 "%s uri_src. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
-                 "videoconvert ! %s",
-                 src_str, plain_sink);
+        if (forward_branch != NULL) {
+            asprintf(&pipeline_str,
+                     "%s uri_src. ! tee name=raw_tee "
+                     "raw_tee. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                     "%s "
+                     "%s",
+                     src_str, plain_output_chain, forward_branch);
+        } else {
+            asprintf(&pipeline_str,
+                     "%s uri_src. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                     "%s",
+                     src_str, plain_output_chain);
+        }
     } else {
-        asprintf(&pipeline_str,
-                 "%s ! rtp%sdepay ! %sparse config-interval=1 disable-passthrough=true ! "
-                 "%s qos=false ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
-                 "videoconvert ! %s",
-                 src_str, codec, codec, decoder, plain_sink);
+        if (forward_branch != NULL) {
+            asprintf(&pipeline_str,
+                     "%s ! rtp%sdepay ! %sparse config-interval=1 disable-passthrough=true ! "
+                     "tee name=encoded_tee "
+                     "encoded_tee. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                     "%s qos=false ! %s "
+                     "%s",
+                     src_str, codec, codec, decoder, plain_output_chain, forward_branch);
+        } else {
+            asprintf(&pipeline_str,
+                     "%s ! rtp%sdepay ! %sparse config-interval=1 disable-passthrough=true ! "
+                     "%s qos=false ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                     "%s",
+                     src_str, codec, codec, decoder, plain_output_chain);
+        }
     }
 
     free(src_str);
     if (decoder) free(decoder);
+    if (forward_branch) free(forward_branch);
+    if (plain_output_chain) free(plain_output_chain);
     return pipeline_str;
 }
 
 
-int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url, char *video_sink, char *dvr_path, int dvr_segment_secs, int plain_player)
+int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url, char *video_sink, char *dvr_path, int dvr_segment_secs, int dvr_bitrate, char *dvr_preset, int plain_player, char *rtp_forward_host, int rtp_forward_port)
 {
     int screen_height = screen_width * 9 / 16;
 
@@ -408,7 +502,10 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
 
     if (plain_player) {
         char *pipeline_str = build_plain_pipeline(rtp_port, codec, rtp_jitter,
-                                                   osd_render, input_url, video_sink);
+                                                   osd_render, input_url, video_sink,
+                                                   rtp_forward_host, rtp_forward_port,
+                                                   dvr_path, dvr_segment_secs,
+                                                   dvr_bitrate, dvr_preset);
         printf("GST plain pipeline: %s\n", pipeline_str);
         GError *error = NULL;
         pipeline = gst_parse_launch(pipeline_str, &error);
@@ -449,6 +546,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
     {
         char *pipeline_str = NULL;
         char *src_str = NULL;
+        char *forward_branch = NULL;
         GError *error = NULL;
         gboolean is_srt_source = FALSE;
         gboolean is_generic_uri_source = FALSE;
@@ -459,7 +557,8 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                 fprintf(stderr, "Дозволені символи: alnum / . - _ %%\n");
                 exit(1);
             }
-            sink_str = build_dvr_sink_chain(osd_render, video_sink, dvr_path, dvr_segment_secs);
+            sink_str = build_dvr_sink_chain(osd_render, video_sink, dvr_path, dvr_segment_secs,
+                                            dvr_bitrate, dvr_preset);
         } else {
             sink_str = select_osd_render(osd_render, video_sink);
         }
@@ -530,6 +629,27 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
             }
         }
 
+        if (rtp_forward_host != NULL && rtp_forward_port > 0) {
+            if (is_generic_uri_source) {
+                const char *encoder = g_strcmp0(codec, "h265") == 0 ?
+                    "x265enc tune=zerolatency speed-preset=ultrafast" :
+                    "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30";
+
+                asprintf(&forward_branch,
+                         "raw_tee. ! queue leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+                         "videoconvert ! %s ! %sparse config-interval=1 disable-passthrough=true ! "
+                         "rtp%spay config-interval=1 pt=96 ! "
+                         "udpsink host=\"%s\" port=%d sync=false async=false",
+                         encoder, codec, codec, rtp_forward_host, rtp_forward_port);
+            } else {
+                asprintf(&forward_branch,
+                         "encoded_tee. ! queue leaky=downstream max-size-buffers=16 max-size-bytes=0 max-size-time=0 ! "
+                         "rtp%spay config-interval=1 pt=96 ! "
+                         "udpsink host=\"%s\" port=%d sync=false async=false",
+                         codec, rtp_forward_host, rtp_forward_port);
+            }
+        }
+
         /*
          * Upstream-style архітектура з glvideomixer + appsrc:
          *   відео → decoder → queue → glupload → glcolorconvert → mixer.sink_0
@@ -545,7 +665,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
             "glvideomixerelement emit-signals=true start-time-selection=1 name=osd_mixer "
             "sink_0::emit-signals=true sink_0::width=%d sink_0::height=%d sink_0::zorder=-2 "
             "sink_1::emit-signals=true sink_1::width=%d sink_1::height=%d sink_1::zorder=0 "
-            "! %s sync=false ";
+            "! %s ";
 
         const char *osd_branch =
             "appsrc name=osd_src stream-type=0 format=time min-latency=0 ! "
@@ -554,59 +674,121 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
 
         if (is_srt_source)
         {
-            asprintf(&pipeline_str,
-                     "%s ! "
-                     "tsdemux ! "
-                     "%sparse config-interval=1 disable-passthrough=true ! "
-                     "%s qos=false ! "
-                     "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
-                     "glupload ! glcolorconvert ! "
-                     "%s "
-                     "%s",
-                     src_str, codec, decoder,
-                     g_strdup_printf(mixer_chain,
-                                     screen_width, screen_height,
-                                     screen_width, screen_height,
-                                     sink_str),
-                     g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT));
+            if (forward_branch != NULL) {
+                asprintf(&pipeline_str,
+                         "%s ! "
+                         "tsdemux ! "
+                         "%sparse config-interval=1 disable-passthrough=true ! "
+                         "tee name=encoded_tee "
+                         "encoded_tee. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                         "%s qos=false ! "
+                         "glupload ! glcolorconvert ! "
+                         "%s "
+                         "%s "
+                         "%s",
+                         src_str, codec, decoder,
+                         g_strdup_printf(mixer_chain,
+                                         screen_width, screen_height,
+                                         screen_width, screen_height,
+                                         sink_str),
+                         g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT),
+                         forward_branch);
+            } else {
+                asprintf(&pipeline_str,
+                         "%s ! "
+                         "tsdemux ! "
+                         "%sparse config-interval=1 disable-passthrough=true ! "
+                         "%s qos=false ! "
+                         "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                         "glupload ! glcolorconvert ! "
+                         "%s "
+                         "%s",
+                         src_str, codec, decoder,
+                         g_strdup_printf(mixer_chain,
+                                         screen_width, screen_height,
+                                         screen_width, screen_height,
+                                         sink_str),
+                         g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT));
+            }
         }
         else if (is_generic_uri_source)
         {
-            asprintf(&pipeline_str,
-                     "%s "
-                     "uri_src. ! "
-                     "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
-                     "glupload ! glcolorconvert ! "
-                     "%s "
-                     "%s",
-                     src_str,
-                     g_strdup_printf(mixer_chain,
-                                     screen_width, screen_height,
-                                     screen_width, screen_height,
-                                     sink_str),
-                     g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT));
+            if (forward_branch != NULL) {
+                asprintf(&pipeline_str,
+                         "%s "
+                         "uri_src. ! tee name=raw_tee "
+                         "raw_tee. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                         "glupload ! glcolorconvert ! "
+                         "%s "
+                         "%s "
+                         "%s",
+                         src_str,
+                         g_strdup_printf(mixer_chain,
+                                         screen_width, screen_height,
+                                         screen_width, screen_height,
+                                         sink_str),
+                         g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT),
+                         forward_branch);
+            } else {
+                asprintf(&pipeline_str,
+                         "%s "
+                         "uri_src. ! "
+                         "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                         "glupload ! glcolorconvert ! "
+                         "%s "
+                         "%s",
+                         src_str,
+                         g_strdup_printf(mixer_chain,
+                                         screen_width, screen_height,
+                                         screen_width, screen_height,
+                                         sink_str),
+                         g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT));
+            }
         }
         else
         {
-            asprintf(&pipeline_str,
-                     "%s ! "
-                     "rtp%sdepay ! "
-                     "%sparse config-interval=1 disable-passthrough=true ! "
-                     "%s qos=false ! "
-                     "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
-                     "glupload ! glcolorconvert ! "
-                     "%s "
-                     "%s",
-                     src_str, codec, codec, decoder,
-                     g_strdup_printf(mixer_chain,
-                                     screen_width, screen_height,
-                                     screen_width, screen_height,
-                                     sink_str),
-                     g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT));
+            if (forward_branch != NULL) {
+                asprintf(&pipeline_str,
+                         "%s ! "
+                         "rtp%sdepay ! "
+                         "%sparse config-interval=1 disable-passthrough=true ! "
+                         "tee name=encoded_tee "
+                         "encoded_tee. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                         "%s qos=false ! "
+                         "glupload ! glcolorconvert ! "
+                         "%s "
+                         "%s "
+                         "%s",
+                         src_str, codec, codec, decoder,
+                         g_strdup_printf(mixer_chain,
+                                         screen_width, screen_height,
+                                         screen_width, screen_height,
+                                         sink_str),
+                         g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT),
+                         forward_branch);
+            } else {
+                asprintf(&pipeline_str,
+                         "%s ! "
+                         "rtp%sdepay ! "
+                         "%sparse config-interval=1 disable-passthrough=true ! "
+                         "%s qos=false ! "
+                         "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
+                         "glupload ! glcolorconvert ! "
+                         "%s "
+                         "%s",
+                         src_str, codec, codec, decoder,
+                         g_strdup_printf(mixer_chain,
+                                         screen_width, screen_height,
+                                         screen_width, screen_height,
+                                         sink_str),
+                         g_strdup_printf(osd_branch, GRAPHICS_WIDTH, GRAPHICS_HEIGHT));
+            }
         }
 
         free(sink_str);
         free(src_str);
+        if (forward_branch != NULL)
+            free(forward_branch);
         if (decoder != NULL)
             free(decoder);
 

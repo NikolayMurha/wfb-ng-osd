@@ -46,7 +46,7 @@
 
 
 #ifdef __GST_OPENGL__
-int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url, char *video_sink, char *dvr_path, int dvr_segment_secs, int plain_player);
+int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url, char *video_sink, char *dvr_path, int dvr_segment_secs, int dvr_bitrate, char *dvr_preset, int plain_player, char *rtp_forward_host, int rtp_forward_port);
 #ifdef __APPLE__
 #include <gst/gstmacos.h>
 #endif
@@ -61,13 +61,17 @@ typedef struct {
     char *video_sink;
     char *dvr_path;
     int dvr_segment_secs;
+    int dvr_bitrate;
+    char *dvr_preset;
     int plain_player;
+    char *rtp_forward_host;
+    int rtp_forward_port;
 } gst_thread_args_t;
 
 static void *gst_thread_start(void *arg)
 {
     gst_thread_args_t *args = (gst_thread_args_t *)arg;
-    gst_main(args->rtp_port, args->codec, args->rtp_jitter, args->osd_render, args->screen_width, args->input_url, args->video_sink, args->dvr_path, args->dvr_segment_secs, args->plain_player);
+    gst_main(args->rtp_port, args->codec, args->rtp_jitter, args->osd_render, args->screen_width, args->input_url, args->video_sink, args->dvr_path, args->dvr_segment_secs, args->dvr_bitrate, args->dvr_preset, args->plain_player, args->rtp_forward_host, args->rtp_forward_port);
     fprintf(stderr, "gst thread exited\n");
     exit(1);
 }
@@ -252,6 +256,66 @@ static void apply_disable_list(const char *disable_list)
     free(copy);
 }
 
+#ifdef __GST_OPENGL__
+static void parse_rtp_forward(const char *value, char **host, int *port)
+{
+    char *sep;
+    char *end = NULL;
+    long parsed_port;
+
+    if (value == NULL || value[0] == '\0') {
+        fprintf(stderr, "Invalid RTP forward target: empty value\n");
+        exit(1);
+    }
+
+    sep = strrchr(value, ':');
+    if (sep == NULL || sep == value || sep[1] == '\0') {
+        fprintf(stderr, "Invalid RTP forward target: %s (expected host:port)\n", value);
+        exit(1);
+    }
+
+    for (const char *p = value; p < sep; p++) {
+        if (!isalnum((unsigned char)*p) && *p != '.' && *p != '-' && *p != '_') {
+            fprintf(stderr, "Invalid RTP forward host: %s\n", value);
+            exit(1);
+        }
+    }
+
+    errno = 0;
+    parsed_port = strtol(sep + 1, &end, 10);
+    if (errno != 0 || end == sep + 1 || *end != '\0' || parsed_port <= 0 || parsed_port > 65535) {
+        fprintf(stderr, "Invalid RTP forward port: %s\n", sep + 1);
+        exit(1);
+    }
+
+    free(*host);
+    *host = strndup(value, sep - value);
+    if (*host == NULL) {
+        perror("strndup");
+        exit(1);
+    }
+    *port = (int)parsed_port;
+}
+
+static int is_safe_x264_preset(const char *preset)
+{
+    const char *allowed[] = {
+        "ultrafast", "superfast", "veryfast", "faster", "fast",
+        "medium", "slow", "slower", "veryslow", "placebo",
+    };
+
+    if (preset == NULL || preset[0] == '\0')
+        return 0;
+
+    for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
+        if (strcmp(preset, allowed[i]) == 0)
+            return 1;
+    }
+
+    return 0;
+}
+#endif
+
 static int osd_main(int argc, char **argv)
 {
     int opt;
@@ -271,7 +335,11 @@ static int osd_main(int argc, char **argv)
     char *video_sink = NULL;
     char *dvr_path = NULL;
     int dvr_segment_secs = 60;
+    int dvr_bitrate = 12000;
+    char *dvr_preset = "veryfast";
     int plain_player = 0;
+    char *rtp_forward_host = NULL;
+    int rtp_forward_port = 0;
 
     uint8_t buf[65536];
     int fd;
@@ -284,12 +352,15 @@ static int osd_main(int argc, char **argv)
 
     telemetry_watchdog_init(&telemetry_watchdog);
 
-    while ((opt = getopt(argc, argv, "hdp:P:R:D:45j:Hi:xakgs:w:O:S:n")) != -1) {
+    while ((opt = getopt(argc, argv, "hdp:P:R:D:F:45j:Hi:xakgs:w:O:S:B:E:n")) != -1) {
         switch (opt) {
         case 'p': osd_port    = atoi(optarg); break;
         case 'P': rtp_port    = atoi(optarg); break;
         case 'R': input_url   = strdup(optarg); break;
         case 'D': apply_disable_list(optarg); break;
+#ifdef __GST_OPENGL__
+        case 'F': parse_rtp_forward(optarg, &rtp_forward_host, &rtp_forward_port); break;
+#endif
         case '4': codec       = "h264"; break;
         case '5': codec       = "h265"; break;
         case 'j': rtp_jitter  = atoi(optarg); break;
@@ -316,19 +387,38 @@ static int osd_main(int argc, char **argv)
                 goto show_usage;
             }
             break;
+        case 'B':
+            dvr_bitrate = atoi(optarg);
+            if (dvr_bitrate <= 0) {
+                fprintf(stderr, "Invalid DVR bitrate: %s\n", optarg);
+                goto show_usage;
+            }
+            break;
+        case 'E':
+#ifdef __GST_OPENGL__
+            if (!is_safe_x264_preset(optarg)) {
+                fprintf(stderr, "Invalid DVR x264 preset: %s\n", optarg);
+                goto show_usage;
+            }
+            dvr_preset = strdup(optarg);
+#endif
+            break;
         case 'd': osd_debug   = 1; break;
         case 'h':
         default:
         show_usage:
 #ifdef __GST_OPENGL__
-            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [-R input_url] [-D disable_items] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-k] [-g] [-s video_sink] [-w screen_width] [-O dvr_path] [-S dvr_segment_secs] [-n]\n", argv[0]);
+            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [-R input_url] [-D disable_items] [-F host:port] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-k] [-g] [-s video_sink] [-w screen_width] [-O dvr_path] [-S dvr_segment_secs] [-B dvr_kbit] [-E x264_preset] [-n]\n", argv[0]);
             fprintf(stderr, "  -n  plain player mode (no OSD overlay)\n");
+            fprintf(stderr, "  -F  forward source video as UDP RTP to host:port; generic URI input is re-encoded\n");
             fprintf(stderr, "Default: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, screen_width=%d\n",
                     osd_port, rtp_port,
                     input_url != NULL ? input_url : "none",
                     codec, rtp_jitter, heartbeat_tx_enabled, heartbeat_tx_interval_ms, screen_width);
             fprintf(stderr, "DVR: -O /path/segment_%%05d.ts   (шлях до файлів запису; %%05d — номер сегменту)\n");
             fprintf(stderr, "     -S <seconds>               (тривалість сегменту, default=%d)\n", dvr_segment_secs);
+            fprintf(stderr, "     -B <kbit/s>                (H264 bitrate, default=%d)\n", dvr_bitrate);
+            fprintf(stderr, "     -E <preset>                (x264 preset, default=%s)\n", dvr_preset);
 #else
             fprintf(stderr, "%s [-p mavlink_port] [-D disable_items] [-H] [-i heartbeat_ms]\n", argv[0]);
             fprintf(stderr, "Default: mavlink_port=%d, heartbeat_tx=%d, heartbeat_ms=%d\n",
@@ -348,12 +438,13 @@ static int osd_main(int argc, char **argv)
     dvr_recording = (dvr_path != NULL);
 
 #ifdef __GST_OPENGL__
-    printf("Use: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, osd_render=%d, video_sink=%s, screen_width=%d, dvr_path=%s, dvr_segment_secs=%d, plain_player=%d\n",
+    printf("Use: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, osd_render=%d, video_sink=%s, screen_width=%d, dvr_path=%s, dvr_segment_secs=%d, dvr_bitrate=%d, dvr_preset=%s, plain_player=%d, rtp_forward=%s\n",
            osd_port, rtp_port,
            input_url != NULL ? input_url : "none",
            codec, rtp_jitter, heartbeat_tx_enabled, heartbeat_tx_interval_ms, osd_render,
            video_sink != NULL ? video_sink : "none", screen_width,
-           dvr_path != NULL ? dvr_path : "none", dvr_segment_secs, plain_player);
+           dvr_path != NULL ? dvr_path : "none", dvr_segment_secs, dvr_bitrate, dvr_preset, plain_player,
+           rtp_forward_host != NULL ? rtp_forward_host : "none");
 
     osd_init(0, 0, 1, 1);
     fd = open_udp_socket_for_rx(osd_port);
@@ -368,7 +459,11 @@ static int osd_main(int argc, char **argv)
         .video_sink      = video_sink,
         .dvr_path        = dvr_path,
         .dvr_segment_secs = dvr_segment_secs,
+        .dvr_bitrate     = dvr_bitrate,
+        .dvr_preset      = dvr_preset,
         .plain_player    = plain_player,
+        .rtp_forward_host = rtp_forward_host,
+        .rtp_forward_port = rtp_forward_port,
     };
 
     pthread_t tid;
