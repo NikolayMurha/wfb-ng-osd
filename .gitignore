@@ -6,3 +6,5 @@ osd.rpi3
 docker/src/
 dist/
 deb_dist/
+.claude/
+wfb-record/
