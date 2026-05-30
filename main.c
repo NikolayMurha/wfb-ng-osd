@@ -46,7 +46,7 @@
 
 
 #ifdef __GST_OPENGL__
-int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url, char *video_sink);
+int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url, char *video_sink, char *dvr_path, int dvr_segment_secs, int plain_player);
 #ifdef __APPLE__
 #include <gst/gstmacos.h>
 #endif
@@ -59,12 +59,15 @@ typedef struct {
     int screen_width;
     char *input_url;
     char *video_sink;
+    char *dvr_path;
+    int dvr_segment_secs;
+    int plain_player;
 } gst_thread_args_t;
 
 static void *gst_thread_start(void *arg)
 {
     gst_thread_args_t *args = (gst_thread_args_t *)arg;
-    gst_main(args->rtp_port, args->codec, args->rtp_jitter, args->osd_render, args->screen_width, args->input_url, args->video_sink);
+    gst_main(args->rtp_port, args->codec, args->rtp_jitter, args->osd_render, args->screen_width, args->input_url, args->video_sink, args->dvr_path, args->dvr_segment_secs, args->plain_player);
     fprintf(stderr, "gst thread exited\n");
     exit(1);
 }
@@ -72,6 +75,7 @@ static void *gst_thread_start(void *arg)
 
 static volatile uint8_t finished = 0;
 int osd_debug = 0;
+int dvr_recording = 0;
 
 void sigterm_handler(int signum)
 {
@@ -265,6 +269,9 @@ static int osd_main(int argc, char **argv)
     int screen_width = 1920;
     char *input_url = NULL;
     char *video_sink = NULL;
+    char *dvr_path = NULL;
+    int dvr_segment_secs = 60;
+    int plain_player = 0;
 
     uint8_t buf[65536];
     int fd;
@@ -277,7 +284,7 @@ static int osd_main(int argc, char **argv)
 
     telemetry_watchdog_init(&telemetry_watchdog);
 
-    while ((opt = getopt(argc, argv, "hdp:P:R:D:45j:Hi:xakgs:w:")) != -1) {
+    while ((opt = getopt(argc, argv, "hdp:P:R:D:45j:Hi:xakgs:w:O:S:n")) != -1) {
         switch (opt) {
         case 'p': osd_port    = atoi(optarg); break;
         case 'P': rtp_port    = atoi(optarg); break;
@@ -300,16 +307,28 @@ static int osd_main(int argc, char **argv)
         case 'g': osd_render  = OSD_RENDER_GTK; break;
         case 's': video_sink  = strdup(optarg); break;
         case 'w': screen_width = atoi(optarg); break;
+        case 'n': plain_player = 1; break;
+        case 'O': dvr_path    = strdup(optarg); break;
+        case 'S':
+            dvr_segment_secs = atoi(optarg);
+            if (dvr_segment_secs <= 0) {
+                fprintf(stderr, "Невірна тривалість сегменту DVR: %s\n", optarg);
+                goto show_usage;
+            }
+            break;
         case 'd': osd_debug   = 1; break;
         case 'h':
         default:
         show_usage:
 #ifdef __GST_OPENGL__
-            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [ -R input_url ] [-D disable_items] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-k] [-g] [-s video_sink] [-w screen_width] \n", argv[0]);
+            fprintf(stderr, "%s [-p mavlink_port] [-P rtp_port] [-R input_url] [-D disable_items] [-4] [-5] [-j rtp_jitter] [-H] [-i heartbeat_ms] [-x] [-a] [-k] [-g] [-s video_sink] [-w screen_width] [-O dvr_path] [-S dvr_segment_secs] [-n]\n", argv[0]);
+            fprintf(stderr, "  -n  plain player mode (no OSD overlay)\n");
             fprintf(stderr, "Default: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, screen_width=%d\n",
                     osd_port, rtp_port,
                     input_url != NULL ? input_url : "none",
                     codec, rtp_jitter, heartbeat_tx_enabled, heartbeat_tx_interval_ms, screen_width);
+            fprintf(stderr, "DVR: -O /path/segment_%%05d.ts   (шлях до файлів запису; %%05d — номер сегменту)\n");
+            fprintf(stderr, "     -S <seconds>               (тривалість сегменту, default=%d)\n", dvr_segment_secs);
 #else
             fprintf(stderr, "%s [-p mavlink_port] [-D disable_items] [-H] [-i heartbeat_ms]\n", argv[0]);
             fprintf(stderr, "Default: mavlink_port=%d, heartbeat_tx=%d, heartbeat_ms=%d\n",
@@ -326,25 +345,30 @@ static int osd_main(int argc, char **argv)
         goto show_usage;
 
     telemetry_watchdog_set_heartbeat_tx(&telemetry_watchdog, heartbeat_tx_enabled, (uint32_t)heartbeat_tx_interval_ms);
+    dvr_recording = (dvr_path != NULL);
 
 #ifdef __GST_OPENGL__
-    printf("Use: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, osd_render=%d, video_sink=%s, screen_width=%d\n",
+    printf("Use: mavlink_port=%d, rtp_port=%d, input_url=%s, codec=%s, rtp_jitter=%d, heartbeat_tx=%d, heartbeat_ms=%d, osd_render=%d, video_sink=%s, screen_width=%d, dvr_path=%s, dvr_segment_secs=%d, plain_player=%d\n",
            osd_port, rtp_port,
            input_url != NULL ? input_url : "none",
            codec, rtp_jitter, heartbeat_tx_enabled, heartbeat_tx_interval_ms, osd_render,
-           video_sink != NULL ? video_sink : "none", screen_width);
+           video_sink != NULL ? video_sink : "none", screen_width,
+           dvr_path != NULL ? dvr_path : "none", dvr_segment_secs, plain_player);
 
     osd_init(0, 0, 1, 1);
     fd = open_udp_socket_for_rx(osd_port);
 
     gst_thread_args_t gst_args = {
-        .rtp_port   = rtp_port,
-        .codec      = codec,
-        .rtp_jitter = rtp_jitter,
-        .osd_render = osd_render,
-        .screen_width = screen_width,
-        .input_url  = input_url,
-        .video_sink  = video_sink,
+        .rtp_port        = rtp_port,
+        .codec           = codec,
+        .rtp_jitter      = rtp_jitter,
+        .osd_render      = osd_render,
+        .screen_width    = screen_width,
+        .input_url       = input_url,
+        .video_sink      = video_sink,
+        .dvr_path        = dvr_path,
+        .dvr_segment_secs = dvr_segment_secs,
+        .plain_player    = plain_player,
     };
 
     pthread_t tid;

@@ -33,6 +33,8 @@
 #include "math3d.h"
 #include "px4_custom_mode.h"
 
+extern int dvr_recording;
+
 #define R2D     57.295779513082320876798154814105f                                      //180/PI
 #define D2R     0.017453292519943295769236907684886f                                    //PI/180
 
@@ -176,6 +178,7 @@ void RenderScreen(void) {
   draw_panel_changed();
   draw_warning();
   draw_osd_messages();
+  draw_dvr_indicator();
 }
 
 
@@ -1267,6 +1270,27 @@ void draw_wind(void) {
   float tmp = osd_windSpeed * convert_speed;
   snprintf(tmp_str, sizeof(tmp_str), "%.2f%s", tmp, spd_unit);
   write_string(tmp_str, posX + 15, posY, 0, 0, TEXT_VA_MIDDLE, TEXT_HA_LEFT, 0, SIZE_TO_FONT[0]);
+}
+
+void draw_dvr_indicator(void) {
+    if (!dvr_recording)
+        return;
+
+    /* Блимає з частотою 1 Гц: 500 мс видно, 500 мс невидно */
+    if (GetSystimeMS() % 1000 >= 500)
+        return;
+
+    /* Червона крапка у верхньому правому куті, color=2 (0xff0000ff = red RGBA) */
+    const int cx = GRAPHICS_RIGHT - 12;
+    const int cy = GRAPHICS_BOTTOM - 8;
+    const int r  = 6;
+
+    for (int dy = -r; dy <= r; dy++) {
+        for (int dx = -r; dx <= r; dx++) {
+            if (dx * dx + dy * dy <= r * r)
+                write_pixel_lm(cx + dx, cy + dy, 1, 2);
+        }
+    }
 }
 
 void draw_warning(void) {

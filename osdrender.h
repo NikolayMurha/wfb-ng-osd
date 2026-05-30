@@ -74,6 +74,7 @@ void draw_wind(void);
 void draw_map(void);
 void draw_panel_changed(void);
 void draw_warning(void);
+void draw_dvr_indicator(void);
 void draw_CWH(void);
 void draw_head_wp_home(void);
 void draw_osd_messages(void);
