@@ -199,7 +199,7 @@ static char* build_dvr_sink_chain(osd_render_t osd_render, const char *video_sin
              "dvr_tee. ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
              "%s%s "
              "dvr_tee. ! queue leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
-             "videoconvert ! "
+             "videoconvert ! video/x-raw,format=I420 ! "
              "x264enc tune=zerolatency speed-preset=%s bitrate=%d key-int-max=60 ! "
              "h264parse ! "
              "splitmuxsink name=dvr_sink location=\"%s\" max-size-time=%" G_GUINT64_FORMAT " muxer=mpegtsmux",
@@ -310,6 +310,7 @@ static char* build_plain_output_chain(const char *plain_sink, const char *dvr_pa
              "plain_dvr_tee. ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
              "%s "
              "plain_dvr_tee. ! queue leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+             "video/x-raw,format=I420 ! "
              "x264enc tune=zerolatency speed-preset=%s bitrate=%d key-int-max=60 ! "
              "h264parse ! "
              "splitmuxsink name=dvr_sink location=\"%s\" max-size-time=%" G_GUINT64_FORMAT " muxer=mpegtsmux",

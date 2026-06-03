@@ -7,4 +7,6 @@ docker/src/
 dist/
 deb_dist/
 .claude/
+CLAUDE.md
+AGENTS.md
 wfb-record/

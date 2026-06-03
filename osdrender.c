@@ -1276,14 +1276,10 @@ void draw_dvr_indicator(void) {
     if (!dvr_recording)
         return;
 
-    /* Блимає з частотою 1 Гц: 500 мс видно, 500 мс невидно */
-    if (GetSystimeMS() % 1000 >= 500)
-        return;
-
     /* Червона крапка у верхньому правому куті, color=2 (0xff0000ff = red RGBA) */
-    const int cx = GRAPHICS_RIGHT - 12;
-    const int cy = GRAPHICS_BOTTOM - 8;
-    const int r  = 6;
+    const int cx = GRAPHICS_RIGHT - 10;
+    const int cy = GRAPHICS_BOTTOM - 6;
+    const int r  = 4;
 
     for (int dy = -r; dy <= r; dy++) {
         for (int dx = -r; dx <= r; dx++) {
