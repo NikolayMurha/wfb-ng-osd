@@ -305,11 +305,12 @@ static char* build_plain_output_chain(const char *plain_sink, const char *dvr_pa
     guint64 max_time_ns = (guint64)dvr_segment_secs * GST_SECOND;
 
     asprintf(&result,
-             "videoconvert ! "
              "tee name=plain_dvr_tee "
              "plain_dvr_tee. ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+             "videoconvert ! "
              "%s "
              "plain_dvr_tee. ! queue leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+             "videoconvert ! "
              "video/x-raw,format=I420 ! "
              "x264enc tune=zerolatency speed-preset=%s bitrate=%d key-int-max=60 ! "
              "h264parse ! "
