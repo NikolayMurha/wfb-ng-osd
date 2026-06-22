@@ -428,18 +428,18 @@ static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
     if (is_srt_source) {
         if (forward_branch != NULL) {
             asprintf(&pipeline_str,
-                     "%s ! tsdemux ! %sparse config-interval=1 disable-passthrough=true ! "
+                     "%s ! tsdemux ! video/x-%s ! %sparse config-interval=1 disable-passthrough=true ! "
                      "tee name=encoded_tee "
                      "encoded_tee. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
                      "%s qos=false ! %s "
                      "%s",
-                     src_str, codec, decoder, plain_output_chain, forward_branch);
+                     src_str, codec, codec, decoder, plain_output_chain, forward_branch);
         } else {
             asprintf(&pipeline_str,
-                     "%s ! tsdemux ! %sparse config-interval=1 disable-passthrough=true ! "
+                     "%s ! tsdemux ! video/x-%s ! %sparse config-interval=1 disable-passthrough=true ! "
                      "%s qos=false ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
                      "%s",
-                     src_str, codec, decoder, plain_output_chain);
+                     src_str, codec, codec, decoder, plain_output_chain);
         }
     } else if (is_generic_uri_source) {
         if (forward_branch != NULL) {
@@ -679,6 +679,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                 asprintf(&pipeline_str,
                          "%s ! "
                          "tsdemux ! "
+                         "video/x-%s ! "
                          "%sparse config-interval=1 disable-passthrough=true ! "
                          "tee name=encoded_tee "
                          "encoded_tee. ! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
@@ -687,7 +688,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                          "%s "
                          "%s "
                          "%s",
-                         src_str, codec, decoder,
+                         src_str, codec, codec, decoder,
                          g_strdup_printf(mixer_chain,
                                          screen_width, screen_height,
                                          screen_width, screen_height,
@@ -698,13 +699,14 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
                 asprintf(&pipeline_str,
                          "%s ! "
                          "tsdemux ! "
+                         "video/x-%s ! "
                          "%sparse config-interval=1 disable-passthrough=true ! "
                          "%s qos=false ! "
                          "queue leaky=downstream max-size-buffers=1 max-size-bytes=0 ! "
                          "glupload ! glcolorconvert ! "
                          "%s "
                          "%s",
-                         src_str, codec, decoder,
+                         src_str, codec, codec, decoder,
                          g_strdup_printf(mixer_chain,
                                          screen_width, screen_height,
                                          screen_width, screen_height,
