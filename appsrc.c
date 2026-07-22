@@ -321,6 +321,45 @@ static char* build_plain_output_chain(const char *plain_sink, const char *dvr_pa
 }
 
 
+static char* select_decoder(char *codec)
+{
+    const char *codecs[] = {"nv%sdec", "v4l2%sdec", "vaapi%sdec", "avdec_%s"};
+    const char *property_names[] = {NULL, NULL, "low-latency", "std-compliance"};
+    const char *property_values[] = {NULL, NULL, "true", "normal"};
+
+    for (size_t i = 0; i < sizeof(codecs) / sizeof(codecs[0]); i++) {
+        char *factory_name = NULL;
+        asprintf(&factory_name, codecs[i], codec);
+        GstElement *element = gst_element_factory_make(factory_name, NULL);
+        if (element == NULL) {
+            free(factory_name);
+            continue;
+        }
+
+        const char *property_name = property_names[i];
+        gboolean has_property = property_name != NULL &&
+            g_object_class_find_property(G_OBJECT_GET_CLASS(element), property_name) != NULL;
+        gst_object_unref(element);
+
+        if (property_name != NULL && !has_property) {
+            fprintf(stderr,
+                    "wfb-ng-osd: decoder %s does not expose optional property %s; continuing without it\n",
+                    factory_name, property_name);
+        }
+        if (has_property) {
+            char *decoder = NULL;
+            asprintf(&decoder, "%s %s=%s", factory_name, property_name, property_values[i]);
+            free(factory_name);
+            return decoder;
+        }
+        return factory_name;
+    }
+
+    fprintf(stderr, "No decoder for %s was found\n", codec);
+    exit(1);
+}
+
+
 static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
                                    osd_render_t osd_render, char *input_url, char *video_sink,
                                    char *rtp_forward_host, int rtp_forward_port,
@@ -378,28 +417,7 @@ static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
     }
 
     if (!is_generic_uri_source) {
-        char *codecs[]      = {"nv%sdec", "v4l2%sdec", "vaapi%sdec", "avdec_%s"};
-        char *codecs_args[] = {NULL, NULL, "low-latency=true", "std-compliance=normal"};
-        for (size_t i = 0; i < sizeof(codecs) / sizeof(codecs[0]); i++) {
-            char *buf = NULL;
-            asprintf(&buf, codecs[i], codec);
-            GstElement *tmp = gst_element_factory_make(buf, NULL);
-            if (tmp != NULL) {
-                gst_object_unref(tmp);
-                if (codecs_args[i] != NULL) {
-                    asprintf(&decoder, "%s %s", buf, codecs_args[i]);
-                    free(buf);
-                } else {
-                    decoder = buf;
-                }
-                break;
-            }
-            free(buf);
-        }
-        if (decoder == NULL) {
-            fprintf(stderr, "No decoder for %s was found\n", codec);
-            exit(1);
-        }
+        decoder = select_decoder(codec);
     }
 
     if (rtp_forward_host != NULL && rtp_forward_port > 0) {
@@ -598,37 +616,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
         char *decoder = NULL;
         if (!is_generic_uri_source)
         {
-            char *codecs[] = {"nv%sdec", "v4l2%sdec", "vaapi%sdec", "avdec_%s"};
-            char *codecs_args[] = {NULL, NULL, "low-latency=true", "std-compliance=normal"};
-            for (size_t i = 0; i < sizeof(codecs) / sizeof(codecs[0]); i++)
-            {
-                char *buf = NULL;
-                asprintf(&buf, codecs[i], codec);
-                GstElement *tmp = gst_element_factory_make(buf, "decoder");
-
-                if (tmp != NULL)
-                {
-                    gst_object_unref(tmp);
-                    if (codecs_args[i] != NULL)
-                    {
-                        asprintf(&decoder, "%s %s", buf, codecs_args[i]);
-                        free(buf);
-                    }
-                    else
-                    {
-                        decoder = buf;
-                    }
-                    break;
-                }
-
-                free(buf);
-            }
-
-            if (decoder == NULL)
-            {
-                fprintf(stderr, "No decoder for %s was found\n", codec);
-                exit(1);
-            }
+            decoder = select_decoder(codec);
         }
 
         if (rtp_forward_host != NULL && rtp_forward_port > 0) {
