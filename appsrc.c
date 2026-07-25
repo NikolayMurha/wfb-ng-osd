@@ -360,7 +360,7 @@ static char* select_decoder(char *codec)
 }
 
 
-static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
+static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts,
                                    osd_render_t osd_render, char *input_url, char *video_sink,
                                    char *rtp_forward_host, int rtp_forward_port,
                                    char *dvr_path, int dvr_segment_secs,
@@ -372,7 +372,7 @@ static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
     char *pipeline_str = NULL;
     char *forward_branch = NULL;
     char *plain_output_chain = NULL;
-    gboolean is_srt_source = FALSE;
+    gboolean is_mpegts_source = FALSE;
     gboolean is_generic_uri_source = FALSE;
 
     /* Вибір sink — CPU-based, glimagesink потребує glupload */
@@ -400,7 +400,7 @@ static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
     }
 
     if (input_url != NULL && g_str_has_prefix(input_url, "srt://")) {
-        is_srt_source = TRUE;
+        is_mpegts_source = TRUE;
         asprintf(&src_str, "srtsrc uri=\"%s\" latency=%d", input_url, rtp_jitter);
     } else if (input_url != NULL &&
                (g_str_has_prefix(input_url, "rtsp://") ||
@@ -409,6 +409,9 @@ static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
     } else if (input_url != NULL) {
         is_generic_uri_source = TRUE;
         asprintf(&src_str, "uridecodebin uri=\"%s\" name=uri_src", input_url);
+    } else if (udp_mpegts) {
+        is_mpegts_source = TRUE;
+        asprintf(&src_str, "udpsrc port=%d", rtp_port);
     } else {
         asprintf(&src_str,
                  "udpsrc port=%d caps=\"application/x-rtp,media=(string)video,clock-rate=(int)90000,encoding-name=(string)H%s\" ! "
@@ -444,7 +447,7 @@ static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
     plain_output_chain = build_plain_output_chain(plain_sink, dvr_path, dvr_segment_secs,
                                                   dvr_bitrate, dvr_preset);
 
-    if (is_srt_source) {
+    if (is_mpegts_source) {
         if (forward_branch != NULL) {
             asprintf(&pipeline_str,
                      "%s ! tsdemux ! video/x-%s ! %sparse config-interval=1 disable-passthrough=true ! "
@@ -500,7 +503,7 @@ static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter,
 }
 
 
-int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render, int screen_width, char *input_url, char *video_sink, char *dvr_path, int dvr_segment_secs, int dvr_bitrate, char *dvr_preset, int plain_player, char *rtp_forward_host, int rtp_forward_port)
+int gst_main(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts, osd_render_t osd_render, int screen_width, char *input_url, char *video_sink, char *dvr_path, int dvr_segment_secs, int dvr_bitrate, char *dvr_preset, int plain_player, char *rtp_forward_host, int rtp_forward_port)
 {
     int screen_height = screen_width * 9 / 16;
 
@@ -521,7 +524,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
     GstElement *pipeline = NULL;
 
     if (plain_player) {
-        char *pipeline_str = build_plain_pipeline(rtp_port, codec, rtp_jitter,
+        char *pipeline_str = build_plain_pipeline(rtp_port, codec, rtp_jitter, udp_mpegts,
                                                    osd_render, input_url, video_sink,
                                                    rtp_forward_host, rtp_forward_port,
                                                    dvr_path, dvr_segment_secs,
@@ -568,7 +571,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
         char *src_str = NULL;
         char *forward_branch = NULL;
         GError *error = NULL;
-        gboolean is_srt_source = FALSE;
+        gboolean is_mpegts_source = FALSE;
         gboolean is_generic_uri_source = FALSE;
         char *sink_str = NULL;
         if (dvr_path != NULL) {
@@ -585,7 +588,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
 
         if (input_url != NULL && g_str_has_prefix(input_url, "srt://"))
         {
-            is_srt_source = TRUE;
+            is_mpegts_source = TRUE;
             asprintf(&src_str,
                      "srtsrc uri=\"%s\" latency=%d",
                      input_url, rtp_jitter);
@@ -604,6 +607,11 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
             asprintf(&src_str,
                      "uridecodebin uri=\"%s\" name=uri_src",
                      input_url);
+        }
+        else if (udp_mpegts)
+        {
+            is_mpegts_source = TRUE;
+            asprintf(&src_str, "udpsrc port=%d", rtp_port);
         }
         else
         {
@@ -662,7 +670,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, osd_render_t osd_render,
             "video/x-raw,format=RGBA,width=%d,height=%d,framerate=0/1 ! "
             "glupload ! glcolorconvert ! osd_mixer.";
 
-        if (is_srt_source)
+        if (is_mpegts_source)
         {
             if (forward_branch != NULL) {
                 asprintf(&pipeline_str,
