@@ -323,9 +323,9 @@ static char* build_plain_output_chain(const char *plain_sink, const char *dvr_pa
 
 static char* select_decoder(char *codec)
 {
-    const char *codecs[] = {"nv%sdec", "v4l2%sdec", "vaapi%sdec", "avdec_%s"};
-    const char *property_names[] = {NULL, NULL, "low-latency", "std-compliance"};
-    const char *property_values[] = {NULL, NULL, "true", "normal"};
+    const char *codecs[] = {"nv%sdec", "v4l2%sdec", "avdec_%s", "vaapi%sdec"};
+    const char *property_names[] = {NULL, NULL, "std-compliance", "low-latency"};
+    const char *property_values[] = {NULL, NULL, "normal", "true"};
 
     for (size_t i = 0; i < sizeof(codecs) / sizeof(codecs[0]); i++) {
         char *factory_name = NULL;
