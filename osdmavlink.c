@@ -32,6 +32,22 @@
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
+#define RELATIVE_ALT_SOURCE_TIMEOUT_MS 2000ULL
+
+static uint64_t last_relative_alt_source_ms = 0;
+
+static bool is_flight_controller_component(uint8_t component_id)
+{
+    return component_id == MAV_COMP_ID_AUTOPILOT1 ||
+           component_id == 50 ||
+           component_id == MAV_COMP_ID_SYSTEM_CONTROL;
+}
+
+static bool is_valid_throttle_percent(uint16_t throttle)
+{
+    return throttle <= 100;
+}
+
 float Rad2Deg(float x)
 {
     return x * (180.0F / M_PI);
@@ -52,7 +68,7 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
             continue;
 
         if (meta != NULL && msg.msgid != MAVLINK_MSG_ID_HEARTBEAT &&
-            (msg.compid == 1 || msg.compid == 50))
+            is_flight_controller_component(msg.compid))
         {
             meta->got_non_heartbeat = 1;
             meta->non_heartbeat_system = msg.sysid;
@@ -63,7 +79,7 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
         {
         case MAVLINK_MSG_ID_HEARTBEAT:
         {
-            if ((msg.compid != 1) && (msg.compid != 50))
+            if (!is_flight_controller_component(msg.compid))
                 break;
 
             mavtype = mavlink_msg_heartbeat_get_type(&msg);
@@ -135,13 +151,26 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
             break;
 
         case MAVLINK_MSG_ID_VFR_HUD:
+        {
+            const float vfr_alt = mavlink_msg_vfr_hud_get_alt(&msg);
+            const uint16_t vfr_throttle = mavlink_msg_vfr_hud_get_throttle(&msg);
+            const uint64_t now = GetSystimeMS();
+
             osd_airspeed    = mavlink_msg_vfr_hud_get_airspeed(&msg);
             osd_groundspeed = mavlink_msg_vfr_hud_get_groundspeed(&msg);
             osd_heading     = mavlink_msg_vfr_hud_get_heading(&msg);
-            osd_throttle    = mavlink_msg_vfr_hud_get_throttle(&msg);
-            osd_alt         = mavlink_msg_vfr_hud_get_alt(&msg);
+            if (is_valid_throttle_percent(vfr_throttle))
+                osd_throttle = vfr_throttle;
+            osd_alt         = vfr_alt;
             osd_climb       = mavlink_msg_vfr_hud_get_climb(&msg);
+
+            if (last_relative_alt_source_ms == 0 ||
+                now - last_relative_alt_source_ms > RELATIVE_ALT_SOURCE_TIMEOUT_MS)
+            {
+                osd_rel_alt = vfr_alt;
+            }
             break;
+        }
 
         case MAVLINK_MSG_ID_GLOBAL_POSITION_INT:
         {
@@ -149,12 +178,14 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
             mavlink_msg_global_position_int_decode(&msg, &p);
             osd_alt     = p.alt / 1000.0;
             osd_rel_alt = p.relative_alt / 1000.0;
+            last_relative_alt_source_ms = GetSystimeMS();
             break;
         }
 
         case MAVLINK_MSG_ID_ALTITUDE:
             osd_bottom_clearance = mavlink_msg_altitude_get_bottom_clearance(&msg);
             osd_rel_alt          = mavlink_msg_altitude_get_altitude_relative(&msg);
+            last_relative_alt_source_ms = GetSystimeMS();
             break;
 
         case MAVLINK_MSG_ID_ATTITUDE:
