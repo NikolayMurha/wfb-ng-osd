@@ -27,6 +27,7 @@
 
 #include "osdmavlink.h"
 #include "osdvar.h"
+#include "battery_cells.h"
 #include "osdconfig.h"
 #include "osdrender.h"
 
@@ -66,6 +67,22 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
         uint8_t c = buf[i];
         if (!mavlink_parse_char(0, c, &msg, &status))
             continue;
+
+        // Local route samples must never refresh the flight-controller watchdog.
+        if (msg.msgid == MAVLINK_MSG_ID_NAMED_VALUE_INT) {
+            mavlink_named_value_int_t sample;
+            mavlink_msg_named_value_int_decode(&msg, &sample);
+            if (strncmp(sample.name, "PING", sizeof(sample.name)) == 0) {
+                if (sample.value >= -1 && sample.value <= 60000) {
+                    ping_history[2] = ping_history[1];
+                    ping_history[1] = ping_history[0];
+                    ping_history[0] = sample.value;
+                    if (ping_count < 3) ++ping_count;
+                    ping_received_ms = ping_monotonic_ms();
+                }
+                continue;
+            }
+        }
 
         if (meta != NULL && msg.msgid != MAVLINK_MSG_ID_HEARTBEAT &&
             is_flight_controller_component(msg.compid))
@@ -125,14 +142,23 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
             break;
 
         case MAVLINK_MSG_ID_SYS_STATUS:
-            osd_vbat_A               = mavlink_msg_sys_status_get_voltage_battery(&msg) / 1000.0f;
+            osd_vbat_A = mavlink_msg_sys_status_get_voltage_battery(&msg) == UINT16_MAX
+                ? 0.0f : mavlink_msg_sys_status_get_voltage_battery(&msg) / 1000.0f;
+            battery_voltage_ms = ping_monotonic_ms();
             osd_curr_A               = mavlink_msg_sys_status_get_current_battery(&msg);
             osd_battery_remaining_A  = mavlink_msg_sys_status_get_battery_remaining(&msg);
             break;
 
-        case MAVLINK_MSG_ID_BATTERY_STATUS:
+        case MAVLINK_MSG_ID_BATTERY_STATUS: {
+            if (mavlink_msg_battery_status_get_id(&msg) != 0) break;
+            uint16_t cells[10], ext[4];
+            mavlink_msg_battery_status_get_voltages(&msg, cells);
+            mavlink_msg_battery_status_get_voltages_ext(&msg, ext);
+            measured_cell_voltage = battery_cell_average(cells, ext, battery_cells);
+            cell_voltage_ms = ping_monotonic_ms();
             osd_curr_consumed_mah = mavlink_msg_battery_status_get_current_consumed(&msg);
             break;
+        }
 
         case MAVLINK_MSG_ID_GPS_RAW_INT:
             osd_lat                 = mavlink_msg_gps_raw_int_get_lat(&msg) / 10000000.0;
@@ -164,8 +190,8 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
             osd_alt         = vfr_alt;
             osd_climb       = mavlink_msg_vfr_hud_get_climb(&msg);
 
-            if (last_relative_alt_source_ms == 0 ||
-                now - last_relative_alt_source_ms > RELATIVE_ALT_SOURCE_TIMEOUT_MS)
+            if (isfinite(vfr_alt) && (last_relative_alt_source_ms == 0 ||
+                now - last_relative_alt_source_ms > RELATIVE_ALT_SOURCE_TIMEOUT_MS))
             {
                 osd_rel_alt = vfr_alt;
             }
@@ -184,8 +210,10 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
 
         case MAVLINK_MSG_ID_ALTITUDE:
             osd_bottom_clearance = mavlink_msg_altitude_get_bottom_clearance(&msg);
-            osd_rel_alt          = mavlink_msg_altitude_get_altitude_relative(&msg);
-            last_relative_alt_source_ms = GetSystimeMS();
+            if (isfinite(mavlink_msg_altitude_get_altitude_relative(&msg))) {
+                osd_rel_alt = mavlink_msg_altitude_get_altitude_relative(&msg);
+                last_relative_alt_source_ms = GetSystimeMS();
+            }
             break;
 
         case MAVLINK_MSG_ID_ATTITUDE:

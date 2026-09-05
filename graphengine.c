@@ -25,6 +25,7 @@
  */
 
 #include <stdio.h>
+#include "osd_cli.h"
 #include <stdlib.h>
 #include <unistd.h>
 #include <assert.h>
@@ -211,8 +212,11 @@ void drawBox(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2) {
  * @param       opaq    0 = transparent, 1 = opaque
  * @param       color   0 = black, 1 = main, 2 = warn
  */
-void inline write_pixel_lm(int x, int y, int opaq, int color){
-    CHECK_COORDS(x, y);
+static bool text_scaling;
+static int text_origin_x, text_origin_y;
+
+static void write_raw_pixel(int x, int y, int opaq, int color){
+    if (x < 0 || x >= GRAPHICS_WIDTH || y < 0 || y >= GRAPHICS_HEIGHT) return;
     assert((opaq == 0 || opaq == 1) && (color >= 0 && color <= 2));
 
 #ifdef __BCM_OPENVG__
@@ -236,7 +240,7 @@ void inline write_pixel_lm(int x, int y, int opaq, int color){
         break;
 
     case 1: // monochrome crt green
-        *ptr = 0xff41ff00u;
+        *ptr = osd_cli.rgba;
         break;
 
     case 2: // amber
@@ -245,6 +249,16 @@ void inline write_pixel_lm(int x, int y, int opaq, int color){
     }
 }
 
+void write_pixel_lm(int x, int y, int opaq, int color) {
+    if (!text_scaling) { write_raw_pixel(x, y, opaq, color); return; }
+    double scale = osd_cli.font_percent / 100.0;
+    int left = text_origin_x + (int)floor((x - text_origin_x) * scale);
+    int right = text_origin_x + (int)floor((x + 1 - text_origin_x) * scale);
+    int top = text_origin_y + (int)floor((y - text_origin_y) * scale);
+    int bottom = text_origin_y + (int)floor((y + 1 - text_origin_y) * scale);
+    for (int yy = top; yy < bottom; ++yy)
+        for (int xx = left; xx < right; ++xx) write_raw_pixel(xx, yy, opaq, color);
+}
 
 /**
  * write_hline_lm: write both level and mask buffers.
@@ -862,13 +876,16 @@ void write_color_string(char *str, int x, int y, int xs, int ys, int va, int ha,
     break;
   }
   // Then write each character.
+  text_origin_x = x;
+  text_origin_y = y;
+  text_scaling = osd_cli.font_percent != 100;
   xx_original = xx;
   while (*str != 0) {
     if (*str == '\n' || *str == '\r') {
       yy += ys + font_info.height;
       xx  = xx_original;
     } else {
-      if (xx >= GRAPHICS_LEFT && xx < GRAPHICS_RIGHT) {
+      if (text_scaling || (xx >= GRAPHICS_LEFT && xx < GRAPHICS_RIGHT)) {
         if (font_info.id < 2) {
           write_char(*str, xx, yy, flags, font, color);
         } else {
@@ -879,4 +896,5 @@ void write_color_string(char *str, int x, int y, int xs, int ys, int va, int ha,
     }
     str++;
   }
+  text_scaling = false;
 }

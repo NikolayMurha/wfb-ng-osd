@@ -5,6 +5,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+extern int32_t ping_history[3];
+extern unsigned ping_count;
+extern uint64_t ping_received_ms;
+extern bool ping_enabled;
+uint64_t ping_monotonic_ms(void);
+
 #define WFB_LINK_LOST   1
 #define WFB_LINK_JAMMED 2
 
@@ -19,6 +25,11 @@ extern uint64_t total_armed_time;
 extern uint8_t vtol_state;
 
 /////////////////////////////////////////////////////////////////////////
+extern unsigned battery_cells;
+extern double measured_cell_voltage;
+extern uint64_t cell_voltage_ms, battery_voltage_ms;
+double osd_cell_voltage(void);
+
 extern float osd_vbat_A;                 // Battery A voltage in milivolt
 extern int16_t osd_curr_A;                 // Battery A current
 extern int8_t osd_battery_remaining_A;    // 0 to 100 <=> 0 to 1000

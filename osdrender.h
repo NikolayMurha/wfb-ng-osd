@@ -33,6 +33,7 @@ enum GPS_Status {
 
 uint64_t GetSystimeMS(void);
 void RenderScreen(void);
+void draw_ping(void);
 
 void draw_uav3d(void);
 void draw_uav2d(void);
@@ -75,6 +76,7 @@ void draw_map(void);
 void draw_panel_changed(void);
 void draw_warning(void);
 void draw_dvr_indicator(void);
+void draw_battery_readout(void);
 void draw_CWH(void);
 void draw_head_wp_home(void);
 void draw_osd_messages(void);

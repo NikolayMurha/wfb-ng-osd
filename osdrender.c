@@ -25,6 +25,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include "osdrender.h"
+#include "betaflight_modes.h"
 #include "graphengine.h"
 #include "osdvar.h"
 #include "fonts.h"
@@ -117,7 +118,10 @@ void do_converts(void) {
   }
 }
 
+#include "osd_cli.h"
+
 bool shownAtPanel(uint16_t itemPanel) {
+  if (osd_cli.has_mask) return true;
   //issue #1 - fixed
   return ((itemPanel & (1 << (current_panel - 1))) != 0);
 }
@@ -129,18 +133,82 @@ bool enabledAndShownOnPanel(uint16_t enabled, uint16_t panel) {
 // TODO: try if this is performance critical or not
 char tmp_str[51] = { 0 };
 
+void draw_battery_readout(void) {
+  uint32_t mask = osd_cli.mask;
+  if (!osd_cli.has_mask) {
+    mask = 0;
+    if (enabledAndShownOnPanel(osd_params.BattRemaining_en, osd_params.BattRemaining_panel))
+      mask |= 1u << OSD_BATTERY_PERCENT;
+    if (enabledAndShownOnPanel(osd_params.BattVolt_en, osd_params.BattVolt_panel))
+      mask |= (1u << OSD_BATTERY_VOLTAGE) | (1u << OSD_CELL_VOLTAGE);
+    if (enabledAndShownOnPanel(osd_params.BattCurrent_en, osd_params.BattCurrent_panel))
+      mask |= 1u << OSD_BATTERY_CURRENT;
+  }
+  int rows = 0;
+  for (int bit = OSD_BATTERY_PERCENT; bit <= OSD_BATTERY_CURRENT; ++bit)
+    rows += (mask >> bit) & 1u;
+  struct FontEntry font;
+  fetch_font_info(0, SIZE_TO_FONT[0], &font, NULL);
+  int height = ((font.height + 1) * osd_cli.font_percent + 99) / 100;
+  int step = height + 2;
+  int y = GRAPHICS_BOTTOM - 10 - height - (rows - 1) * step;
+  for (int bit = OSD_BATTERY_PERCENT; bit <= OSD_BATTERY_CURRENT; ++bit) {
+    if (!(mask & (1u << bit))) continue;
+    switch (bit) {
+    case OSD_BATTERY_PERCENT: snprintf(tmp_str, sizeof(tmp_str), "%d%%", osd_battery_remaining_A); break;
+    case OSD_BATTERY_VOLTAGE: snprintf(tmp_str, sizeof(tmp_str), "%.1fV", (double)osd_vbat_A); break;
+    case OSD_CELL_VOLTAGE:
+      if (osd_cell_voltage() > 0) snprintf(tmp_str, sizeof(tmp_str), "%.2fV", osd_cell_voltage());
+      else snprintf(tmp_str, sizeof(tmp_str), "--- V");
+      break;
+    case OSD_BATTERY_CURRENT: snprintf(tmp_str, sizeof(tmp_str), "%.1fA", (double)osd_curr_A * 0.01); break;
+    }
+    write_color_string(tmp_str, 10, y, 0, 0, TEXT_VA_TOP, TEXT_HA_LEFT, 0, SIZE_TO_FONT[0],
+                       bit == OSD_BATTERY_PERCENT && osd_battery_remaining_A < 20 ? 2 : 1);
+    y += step;
+  }
+}
+
+static void draw_mask_screen(void) {
+#define BLOCK(field, bit) osd_params.field = osd_bit_enabled(bit)
+  BLOCK(CWH_Nmode_en, OSD_COMPASS);
+  BLOCK(CWH_Tmode_en, OSD_HEADING);
+  BLOCK(CWH_home_dist_en, OSD_HOME_DISTANCE);
+  osd_params.CWH_wp_dist_en = 0;
+  BLOCK(FlightMode_en, OSD_FLIGHT_MODE); BLOCK(Arm_en, OSD_FLIGHT_MODE);
+  BLOCK(Alt_Scale_en, OSD_ALTITUDE); BLOCK(Atti_mp_en, OSD_ATTITUDE);
+  BLOCK(Throt_en, OSD_THROTTLE); BLOCK(Time_en, OSD_FLIGHT_TIME);
+  BLOCK(GpsStatus_en, OSD_GPS); BLOCK(GpsHDOP_en, OSD_GPS);
+  BLOCK(GpsLat_en, OSD_COORDINATES); BLOCK(GpsLon_en, OSD_COORDINATES);
+  BLOCK(TSPD_en, OSD_SPEED); BLOCK(TotalTripDist_en, OSD_TRIP);
+  BLOCK(OSDMessages_en, OSD_WARNINGS);
+#undef BLOCK
+  if (!(osd_cli.mask & OSD_GPS_MASK)) osd_params.Alarm_GPS_status_en = 0;
+  if (osd_bit_enabled(OSD_PING)) draw_ping();
+  draw_CWH(); draw_flight_mode(); draw_arm_state();
+  draw_battery_readout();
+  draw_altitude_scale(); draw_uav2d(); draw_throttle(); draw_time();
+  draw_gps_status(); draw_gps_hdop(); draw_gps_latitude(); draw_gps_longitude();
+  draw_ground_speed(); draw_total_trip();
+  if (osd_bit_enabled(OSD_WARNINGS)) { draw_warning(); draw_osd_messages(); }
+  draw_dvr_indicator();
+}
+
 void RenderScreen(void) {
   do_converts();
 
   if (current_panel > osd_params.Max_panels) {
     current_panel = 1;
   }
+  if (osd_cli.has_mask) {
+    draw_mask_screen();
+    return;
+  }
 
+  draw_ping();
   draw_flight_mode();
   draw_arm_state();
-  draw_battery_voltage();
-  draw_battery_current();
-  draw_battery_remaining();
+  draw_battery_readout();
   draw_battery_consumed();
   draw_altitude_scale();
   draw_absolute_altitude();
@@ -179,6 +247,35 @@ void RenderScreen(void) {
   draw_warning();
   draw_osd_messages();
   draw_dvr_indicator();
+}
+
+
+void draw_ping(void)
+{
+    if (!ping_enabled || ping_count == 0) return;
+    bool stale = ping_monotonic_ms() - ping_received_ms > 5000;
+    int color = stale || ping_history[0] < 0 ? 2 : 1;
+    int x = 15;
+    for (unsigned i = 0; i < ping_count + 1; ++i) {
+        // Current ping and unit use the battery font; history uses the smaller 8x8 font.
+        int font = i == 0 || i == ping_count ? SIZE_TO_FONT[0] : 1;
+        if (i == ping_count) {
+            snprintf(tmp_str, sizeof(tmp_str), "ms");
+        } else {
+            char value[16];
+            if (ping_history[i] < 0 || (i == 0 && stale))
+                snprintf(value, sizeof(value), "---");
+            else
+                snprintf(value, sizeof(value), "%d", (int)ping_history[i]);
+            snprintf(tmp_str, sizeof(tmp_str), "%s%s", i == 0 ? "PING " : "", value);
+        }
+        struct FontEntry info;
+        struct FontDimensions dim;
+        fetch_font_info(0, font, &info, NULL);
+        calc_text_dimensions(tmp_str, info, 0, 0, &dim);
+        write_color_string(tmp_str, x, 29, 0, 0, TEXT_VA_BOTTOM, TEXT_HA_LEFT, 0, font, color);
+        x += (dim.width * osd_cli.font_percent + 99) / 100 + 3;
+    }
 }
 
 
@@ -239,6 +336,7 @@ void draw_simple_attitude() {
   }
 
   //draw pitch value
+  if (osd_cli.has_mask ? !osd_bit_enabled(OSD_ATTITUDE_VALUES) : osd_cli.hide_attitude_values) return;
   y = simple_attitude.y0 - 20;
   snprintf(tmp_str, sizeof(tmp_str), "PT %d", (int)osd_pitch);
   write_string(tmp_str, x, y - 3, 0, 0, TEXT_VA_BOTTOM, TEXT_HA_CENTER, 0, SIZE_TO_FONT[1]);
@@ -936,7 +1034,7 @@ void draw_linear_compass(int v, int home_dir, int range, int width, int x, int y
     }
 
      // Put home direction
-     if (osd_got_home && rr == home_dir) {
+     if ((!osd_cli.has_mask || osd_bit_enabled(OSD_HOME_DISTANCE)) && osd_got_home && rr == home_dir) {
          xs = ((long int)(r * width) / (long int)range) + x;
          write_filled_rectangle_lm(xs - 5, majtick_start + textoffset + 7, 10, 10, 0, 1);
          write_string("H", xs + 1, majtick_start + textoffset + 12, 1, 0, TEXT_VA_MIDDLE, TEXT_HA_CENTER, 0, 2);
@@ -952,7 +1050,7 @@ void draw_linear_compass(int v, int home_dir, int range, int width, int x, int y
      /* } */
   }
 
-  if (osd_got_home && home_dir > 0 && !home_drawn) {
+  if ((!osd_cli.has_mask || osd_bit_enabled(OSD_HOME_DISTANCE)) && osd_got_home && home_dir > 0 && !home_drawn) {
      if (((v > home_dir) && (v - home_dir < 180)) || ((v < home_dir) && (home_dir -v > 180)))
      {
          r = x - ((long int)(range_2 * width) / (long int)range);
@@ -1217,7 +1315,7 @@ void draw_head_wp_home() {
 
   // draw home
   // the home only shown when the distance above 1m
-  if (((int32_t)osd_home_distance > 1))
+  if ((!osd_cli.has_mask || osd_bit_enabled(OSD_HOME_DISTANCE)) && ((int32_t)osd_home_distance > 1))
   {
     float homeCX = posX + (osd_params.CWH_Nmode_home_radius) * Fast_Sin(osd_home_bearing);
     float homeCY = posY - (osd_params.CWH_Nmode_home_radius) * Fast_Cos(osd_home_bearing);
@@ -1225,7 +1323,7 @@ void draw_head_wp_home() {
   }
 
   //draw waypoint
-  if ((wp_number != 0) && (wp_dist > 1))
+  if (!osd_cli.has_mask && (wp_number != 0) && (wp_dist > 1))
   {
     //format bearing
     wp_target_bearing = (wp_target_bearing + 360) % 360;
@@ -1556,10 +1654,13 @@ void draw_flight_mode() {
     return;
   }
 
-  char* mode_str = "UNKNOWN";
+  const char* mode_str = "UNKNOWN";
 
   switch (autopilot)
   {
+  case MAV_AUTOPILOT_GENERIC:
+      mode_str = betaflight_mode_name(custom_mode);
+      break;
   case MAV_AUTOPILOT_ARDUPILOTMEGA:       //ardupilotmega
       {
           if (mav_type == MAV_TYPE_FIXED_WING)
@@ -1639,7 +1740,7 @@ void draw_flight_mode() {
 
   int color = (!motor_armed || wfb_errors > 0 || wfb_flags & (WFB_LINK_LOST | WFB_LINK_JAMMED)) ? 2 : 1;
 
-  write_color_string(mode_str, osd_params.FlightMode_posX, osd_params.FlightMode_posY,
+  write_color_string((char *)mode_str, osd_params.FlightMode_posX, osd_params.FlightMode_posY,
                      0, 0, TEXT_VA_TOP, osd_params.FlightMode_align, 0,
                      SIZE_TO_FONT[osd_params.FlightMode_fontsize],
                      color);
@@ -1670,6 +1771,12 @@ void draw_battery_voltage() {
                osd_params.BattVolt_posY, 0, 0, TEXT_VA_TOP,
                osd_params.BattVolt_align, 0,
                SIZE_TO_FONT[osd_params.BattVolt_fontsize]);
+  double cell = osd_cell_voltage();
+  if (cell > 0) snprintf(tmp_str, sizeof(tmp_str), "%.2fV", cell);
+  else snprintf(tmp_str, sizeof(tmp_str), "--- V");
+  write_string(tmp_str, osd_params.BattVolt_posX,
+               osd_params.BattVolt_posY + 12, 0, 0, TEXT_VA_TOP,
+               osd_params.BattVolt_align, 0, SIZE_TO_FONT[0]);
 }
 
 void draw_battery_current() {

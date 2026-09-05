@@ -18,6 +18,22 @@
  * MinimOSD - arducam-osd Controller(https://code.google.com/p/arducam-osd/)
  */
 #include "osdvar.h"
+#include "osd_cli.h"
+osd_cli_t osd_cli = { .rgba = 0xff00ff00u, .font_percent = 100 };
+#include <time.h>
+
+int32_t ping_history[3] = {-1, -1, -1};
+unsigned ping_count = 0;
+uint64_t ping_received_ms = 0;
+bool ping_enabled = true;
+
+uint64_t ping_monotonic_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
 
 /////////////////////////////////////////////////////////////////////////
 uint64_t lastWritePanel = 0;
@@ -30,6 +46,20 @@ uint64_t total_armed_time = 0;
 uint8_t vtol_state = 0;
 
 /////////////////////////////////////////////////////////////////////////
+unsigned battery_cells = 0;
+double measured_cell_voltage = 0;
+uint64_t cell_voltage_ms = 0, battery_voltage_ms = 0;
+
+double osd_cell_voltage(void)
+{
+    uint64_t now = ping_monotonic_ms();
+    if (cell_voltage_ms && now - cell_voltage_ms <= 5000 && measured_cell_voltage > 0)
+        return measured_cell_voltage;
+    if (battery_cells && battery_voltage_ms && now - battery_voltage_ms <= 5000)
+        return osd_vbat_A / battery_cells;
+    return 0;
+}
+
 float osd_vbat_A = 0.0f;                 // Battery A voltage in milivolt
 int16_t osd_curr_A = 0;                 // Battery A current
 int8_t osd_battery_remaining_A = 0;    // 0 to 100 <=> 0 to 1000

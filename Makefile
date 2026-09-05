@@ -102,3 +102,28 @@ osd_image_push:
 clean:
 	rm -rf osd.{rockchip,gst,rpi3} deb_dist *.o *~
 	make -C fpv_video clean
+
+.PHONY: test-ping
+test-ping:
+	$(CC) -std=gnu99 -I. tests/ping_test.c osdmavlink.c osdvar.c -lm -o /tmp/wfb-osd-ping-test
+	/tmp/wfb-osd-ping-test
+
+.PHONY: test-battery
+test-battery:
+	$(CC) -std=gnu99 -I. tests/battery_cells_test.c -lm -o /tmp/wfb-osd-battery-test
+	/tmp/wfb-osd-battery-test
+
+osdmavlink.o: battery_cells.h
+
+osdrender.o: betaflight_modes.h
+main.o osdrender.o graphengine.o osdvar.o: osd_cli.h
+
+.PHONY: test-osd-cli
+test-osd-cli: $(filter-out main.o appsrc.o gst-compat.o,$(OBJS))
+	$(CC) $(CFLAGS) -I. tests/osd_cli_test.c $^ $(LDFLAGS) -o /tmp/wfb-osd-cli-test
+	/tmp/wfb-osd-cli-test
+
+.PHONY: test-betaflight
+test-betaflight:
+	$(CC) -std=gnu99 -I. tests/betaflight_test.c osdmavlink.c osdvar.c -lm -o /tmp/wfb-osd-betaflight-test
+	/tmp/wfb-osd-betaflight-test

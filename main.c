@@ -20,6 +20,8 @@
  */
 
 #include <stdio.h>
+#include <getopt.h>
+#include "osd_cli.h"
 #include <ctype.h>
 #include <string.h>
 #include <strings.h>
@@ -162,6 +164,18 @@ static void disable_group_wfb(void)
 
 static int disable_single_item(const char *name)
 {
+    if (strcasecmp(name, "attitude-values") == 0) {
+        osd_cli.hide_attitude_values = true;
+        return 1;
+    }
+    if (strcasecmp(name, "battery-percent") == 0 || strcasecmp(name, "BattRemaining_en") == 0) {
+        osd_params.BattRemaining_en = 0;
+        return 1;
+    }
+    if (strcasecmp(name, "ping") == 0) {
+        ping_enabled = false;
+        return 1;
+    }
     if (strcasecmp(name, "gps_status") == 0 || strcasecmp(name, "GpsStatus_en") == 0) {
         osd_params.GpsStatus_en = 0;
         osd_params.Alarm_GPS_status_en = 0;
@@ -317,9 +331,16 @@ static int is_safe_x264_preset(const char *preset)
 }
 #endif
 
-static int osd_main(int argc, char **argv)
+static int osd_main(int argc, char **argv, bool validate_only)
 {
     int opt;
+    const osd_params_t initial_params = osd_params;
+    static const struct option options[] = {
+        {"osd-mask", required_argument, NULL, 1000},
+        {"osd-color", required_argument, NULL, 1001},
+        {"osd-font-percent", required_argument, NULL, 1002},
+        {NULL, 0, NULL, 0}
+    };
     int osd_port = 14551;
     int rtp_port = 5600;
     char *codec = "h264";
@@ -338,7 +359,7 @@ static int osd_main(int argc, char **argv)
     char *dvr_path = NULL;
     int dvr_segment_secs = 60;
     int dvr_bitrate = 12000;
-    char *dvr_preset = "veryfast";
+    char *dvr_preset = strdup("veryfast");
     int plain_player = 0;
     char *rtp_forward_host = NULL;
     int rtp_forward_port = 0;
@@ -354,8 +375,40 @@ static int osd_main(int argc, char **argv)
 
     telemetry_watchdog_init(&telemetry_watchdog);
 
-    while ((opt = getopt(argc, argv, "hdp:P:R:D:F:45j:THi:xakgs:w:O:S:B:E:n")) != -1) {
+    while ((opt = getopt_long(argc, argv, "hdp:P:R:D:F:45j:THi:xakgs:w:O:S:B:E:nc:", options, NULL)) != -1) {
         switch (opt) {
+        case 1000:
+            if (!osd_parse_uint(optarg, true, OSD_KNOWN_MASK, &osd_cli.mask)) {
+                fprintf(stderr, "Invalid --osd-mask: expected 0..0x000FFFFF\n");
+                return 2;
+            }
+            osd_cli.has_mask = true;
+            break;
+        case 1001:
+            if (!osd_parse_color(optarg, &osd_cli.rgba)) {
+                fprintf(stderr, "Invalid --osd-color: expected #RRGGBB\n");
+                return 2;
+            }
+            break;
+        case 1002: {
+            uint32_t percent;
+            if (!osd_parse_uint(optarg, false, 150, &percent) || percent < 50) {
+                fprintf(stderr, "Invalid --osd-font-percent: expected 50..150\n");
+                return 2;
+            }
+            osd_cli.font_percent = percent;
+            break;
+        }
+        case 'c': {
+            char *end = NULL;
+            long count = strtol(optarg, &end, 10);
+            if (end == optarg || *end != '\0' || count < 0 || count > 32) {
+                fprintf(stderr, "Кількість банок має бути від 0 до 32 (0 — дані телеметрії)\n");
+                return 1;
+            }
+            battery_cells = (unsigned)count;
+            break;
+        }
         case 'p': osd_port    = atoi(optarg); break;
         case 'P': rtp_port    = atoi(optarg); break;
         case 'R': input_url   = strdup(optarg); break;
@@ -403,6 +456,7 @@ static int osd_main(int argc, char **argv)
                 fprintf(stderr, "Invalid DVR x264 preset: %s\n", optarg);
                 goto show_usage;
             }
+            free(dvr_preset);
             dvr_preset = strdup(optarg);
 #endif
             break;
@@ -411,7 +465,7 @@ static int osd_main(int argc, char **argv)
         default:
         show_usage:
 #ifdef __GST_OPENGL__
-            fprintf(stderr, "%s [-p mavlink_port] [-P video_port] [-T] [-R input_url] [-D disable_items] [-F host:port] [-4] [-5] [-j jitter_ms] [-H] [-i heartbeat_ms] [-x] [-a] [-k] [-g] [-s video_sink] [-w screen_width] [-O dvr_path] [-S dvr_segment_secs] [-B dvr_kbit] [-E x264_preset] [-n]\n", argv[0]);
+            fprintf(stderr, "%s [-c battery_cells] [-p mavlink_port] [-P video_port] [-T] [-R input_url] [-D disable_items] [-F host:port] [-4] [-5] [-j jitter_ms] [-H] [-i heartbeat_ms] [-x] [-a] [-k] [-g] [-s video_sink] [-w screen_width] [-O dvr_path] [-S dvr_segment_secs] [-B dvr_kbit] [-E x264_preset] [-n]\n", argv[0]);
             fprintf(stderr, "  -T  receive raw MPEG-TS over UDP on -P port (default is RTP)\n");
             fprintf(stderr, "  -n  plain player mode (no OSD overlay)\n");
             fprintf(stderr, "  -F  forward source video as UDP RTP to host:port; generic URI input is re-encoded\n");
@@ -424,12 +478,15 @@ static int osd_main(int argc, char **argv)
             fprintf(stderr, "     -B <kbit/s>                (H264 bitrate, default=%d)\n", dvr_bitrate);
             fprintf(stderr, "     -E <preset>                (x264 preset, default=%s)\n", dvr_preset);
 #else
-            fprintf(stderr, "%s [-p mavlink_port] [-D disable_items] [-H] [-i heartbeat_ms]\n", argv[0]);
+            fprintf(stderr, "%s [-c battery_cells] [-p mavlink_port] [-D disable_items] [-H] [-i heartbeat_ms]\n", argv[0]);
             fprintf(stderr, "Default: mavlink_port=%d, heartbeat_tx=%d, heartbeat_ms=%d\n",
                     osd_port, heartbeat_tx_enabled, heartbeat_tx_interval_ms);
 #endif
             fprintf(stderr, "Disable groups/items examples: -D gps,wfb  |  -D wfb_state  |  -D gps_status,gps_coords\n");
             fprintf(stderr, "WFB-ng OSD version " WFB_OSD_VERSION "\n");
+            fprintf(stderr, "  --osd-mask <decimal|0xHEX>  OSD blocks (20 bits, overrides -D)\n"
+                            "  --osd-color '#RRGGBB'       OSD color (default #00ff00)\n"
+                            "  --osd-font-percent 50..150  Text size (default 100)\n");
             fprintf(stderr, "WFB-ng home page: <http://wfb-ng.org>\n");
             exit(1);
         }
@@ -438,7 +495,23 @@ static int osd_main(int argc, char **argv)
     if (optind > argc)
         goto show_usage;
 
+    if (validate_only) {
+        /* Validate before macOS starts its graphical event loop. */
+        free(input_url);
+        free(video_sink);
+        free(dvr_path);
+        free(rtp_forward_host);
+        free(dvr_preset);
+        osd_params = initial_params;
+        return 0;
+    }
+
     telemetry_watchdog_set_heartbeat_tx(&telemetry_watchdog, heartbeat_tx_enabled, (uint32_t)heartbeat_tx_interval_ms);
+    if (osd_cli.has_mask) {
+        osd_params = initial_params;
+        ping_enabled = osd_bit_enabled(OSD_PING);
+        osd_cli.hide_attitude_values = !osd_bit_enabled(OSD_ATTITUDE_VALUES);
+    }
     dvr_recording = (dvr_path != NULL);
 
 #ifdef __GST_OPENGL__
@@ -561,15 +634,19 @@ static int osd_main(int argc, char **argv)
 static int osd_main_macos(int argc, char **argv, gpointer user_data)
 {
     (void)user_data;
-    return osd_main(argc, argv);
+    return osd_main(argc, argv, false);
 }
 #endif
 
 int main(int argc, char **argv)
 {
 #if defined(__APPLE__) && defined(__GST_OPENGL__)
+    int result = osd_main(argc, argv, true);
+    if (result != 0) return result;
+    optind = 1;
+    optreset = 1;
     return gst_macos_main(osd_main_macos, argc, argv, NULL);
 #else
-    return osd_main(argc, argv);
+    return osd_main(argc, argv, false);
 #endif
 }
