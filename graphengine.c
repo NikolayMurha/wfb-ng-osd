@@ -244,7 +244,7 @@ static void write_raw_pixel(int x, int y, int opaq, int color){
         break;
 
     case 2: // amber
-      *ptr = 0xff0000ffu;
+      *ptr = osd_cli.warning_rgba;
       break;
     }
 }

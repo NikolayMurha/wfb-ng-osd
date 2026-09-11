@@ -13,17 +13,19 @@ enum osd_bit {
     OSD_BATTERY_PERCENT, OSD_BATTERY_VOLTAGE, OSD_CELL_VOLTAGE,
     OSD_BATTERY_CURRENT, OSD_GPS, OSD_COORDINATES, OSD_HOME_DISTANCE,
     OSD_SPEED, OSD_TRIP, OSD_ATTITUDE_VALUES, OSD_COMPACT_RETICLE,
-    OSD_ALTITUDE_VALUE, OSD_PING_VERTICAL, OSD_SPREAD_SCALES
+    OSD_ALTITUDE_VALUE, OSD_PING_VERTICAL, OSD_SPREAD_SCALES, OSD_SPEED_VALUE
 };
-#define OSD_KNOWN_MASK UINT32_C(0x007fffff)
-#define OSD_GPS_MASK UINT32_C(0x0003e000)
+#define OSD_KNOWN_MASK UINT32_C(0x00ffffff)
+#define OSD_GPS_MASK UINT32_C(0x0083e000)
 typedef struct {
     bool has_mask;
+    bool demo_ping;
     bool reticle_set;
     enum { RETICLE_DEFAULT, RETICLE_COMPACT, RETICLE_CROSS, RETICLE_CIRCLE, RETICLE_NONE } reticle;
     bool hide_attitude_values;
     uint32_t mask;
     uint32_t rgba;
+    uint32_t warning_rgba;
     unsigned font_percent;
 } osd_cli_t;
 extern osd_cli_t osd_cli;

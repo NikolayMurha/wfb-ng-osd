@@ -1,4 +1,5 @@
 #include "osdmavlink.h"
+#include "osd_cli.h"
 #include "osdvar.h"
 #include <assert.h>
 #include <string.h>
@@ -19,14 +20,22 @@ static void sample(int32_t value, const char *name, int corrupt)
     if (corrupt) bytes[size - 1] ^= 1;
     mavlink_rx_meta_t meta = {0};
     parse_mavlink_packet(bytes, size, &meta);
-    if (strcmp(name, "PING") == 0)
+    if (strcmp(name, "PING") == 0 || strcmp(name, "DEMO_PING") == 0)
         assert(!meta.got_non_heartbeat && !meta.got_heartbeat);
 }
 
 int main(void)
 {
     assert(ping_count == 0);
+    sample(250, "DEMO_PING", 0);
+    assert(ping_count == 0);
+    osd_cli.demo_ping = true;
+    sample(250, "DEMO_PING", 0);
+    assert(ping_count == 1 && ping_history[0] == 250);
     sample(0, "PING", 0);
+    assert(ping_count == 1 && ping_history[0] == 0);
+    sample(999, "DEMO_PING", 0);
+    assert(ping_count == 1 && ping_history[0] == 0);
     sample(41, "PING", 0);
     sample(60000, "PING", 0);
     sample(-1, "PING", 0);

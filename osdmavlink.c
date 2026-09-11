@@ -1,3 +1,4 @@
+#include "osd_cli.h"
 /*
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -72,8 +73,16 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
         if (msg.msgid == MAVLINK_MSG_ID_NAMED_VALUE_INT) {
             mavlink_named_value_int_t sample;
             mavlink_msg_named_value_int_decode(&msg, &sample);
-            if (strncmp(sample.name, "PING", sizeof(sample.name)) == 0) {
+            const bool real_ping = strncmp(sample.name, "PING", sizeof(sample.name)) == 0;
+            const bool demo_ping = strncmp(sample.name, "DEMO_PING", sizeof(sample.name)) == 0;
+            static bool real_ping_received = false;
+            if (real_ping || demo_ping) {
+                if (demo_ping && (!osd_cli.demo_ping || real_ping_received)) continue;
                 if (sample.value >= -1 && sample.value <= 60000) {
+                    if (real_ping && !real_ping_received) {
+                        ping_count = 0;
+                        real_ping_received = true;
+                    }
                     ping_history[2] = ping_history[1];
                     ping_history[1] = ping_history[0];
                     ping_history[0] = sample.value;
@@ -279,6 +288,7 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
             wfb_errors    = mavlink_msg_radio_status_get_rxerrors(&msg);
             wfb_fec_fixed = mavlink_msg_radio_status_get_fixed(&msg);
             wfb_flags     = mavlink_msg_radio_status_get_remnoise(&msg);
+            wfb_status_received = true;
             break;
 
         case MAVLINK_MSG_ID_STATUSTEXT:

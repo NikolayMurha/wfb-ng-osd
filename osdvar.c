@@ -19,7 +19,7 @@
  */
 #include "osdvar.h"
 #include "osd_cli.h"
-osd_cli_t osd_cli = { .rgba = 0xff00ff00u, .font_percent = 100 };
+osd_cli_t osd_cli = { .rgba = 0xff00ff00u, .warning_rgba = 0xff0000ffu, .font_percent = 100 };
 #include <time.h>
 
 int32_t ping_history[3] = {-1, -1, -1};
@@ -136,6 +136,7 @@ int8_t wfb_rssi = -128; //WFB rssi -128dBm
 uint16_t wfb_errors = 0;
 uint16_t wfb_fec_fixed = 0;
 int8_t wfb_flags = WFB_LINK_LOST;
+bool wfb_status_received = false;
 bool rc_lost = true;
 
 uint8_t osd_got_home = 0;               // tels if got home position or not

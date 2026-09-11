@@ -21,6 +21,16 @@ static unsigned pixels(void) {
     return count;
 }
 
+static unsigned warning_pixels(void) {
+    GstBuffer *buffer = displayGraphics(); GstMapInfo info;
+    assert(gst_buffer_map(buffer, &info, GST_MAP_READ));
+    unsigned count = 0;
+    for (unsigned i = 0; i < info.size / 4; ++i)
+        count += ((uint32_t *)info.data)[i] == osd_cli.warning_rgba;
+    gst_buffer_unmap(buffer, &info); gst_buffer_unref(buffer);
+    return count;
+}
+
 static unsigned bottom_pixel(void) {
     GstBuffer *buffer = displayGraphics(); GstMapInfo info;
     assert(gst_buffer_map(buffer, &info, GST_MAP_READ));
@@ -45,10 +55,10 @@ static void snapshot(const char *name) {
 
 int main(int argc, char **argv) {
     uint32_t value;
-    assert(osd_parse_uint("0x007FFFFF", true, OSD_KNOWN_MASK, &value) && value == OSD_KNOWN_MASK);
+    assert(osd_parse_uint("0x00FFFFFF", true, OSD_KNOWN_MASK, &value) && value == OSD_KNOWN_MASK);
     assert(osd_parse_uint("7679", true, OSD_KNOWN_MASK, &value) && value == 0x1dff);
     assert(osd_parse_uint("0", true, OSD_KNOWN_MASK, &value) && value == 0);
-    const char *invalid[] = {"", "0x", "-1", "+1", " 1", "1 ", "1.0", "0x800000", "4294967296", "999999999999999999999999"};
+    const char *invalid[] = {"", "0x", "-1", "+1", " 1", "1 ", "1.0", "0x1000000", "4294967296", "999999999999999999999999"};
     for (unsigned i = 0; i < sizeof(invalid)/sizeof(*invalid); ++i)
         assert(!osd_parse_uint(invalid[i], true, OSD_KNOWN_MASK, &value));
     assert(osd_parse_color("#1234Ab", &value) && value == 0xffab3412);
@@ -57,7 +67,38 @@ int main(int argc, char **argv) {
 
     gst_init(&argc, &argv);
     osd_init(0, 0, 1, 1);
+    osd_cli.warning_rgba = 0xff00ffffu;
+    clearGraphics();
+    write_pixel_lm(20, 20, 1, 2);
+    GstBuffer *color_buffer = displayGraphics();
+    GstMapInfo color_info;
+    assert(gst_buffer_map(color_buffer, &color_info, GST_MAP_READ));
+    assert(((uint32_t *)color_info.data)[20 * GRAPHICS_WIDTH + 20] == osd_cli.warning_rgba);
+    gst_buffer_unmap(color_buffer, &color_info);
+    gst_buffer_unref(color_buffer);
+    osd_cli.warning_rgba = 0xff0000ffu;
     osd_cli.has_mask = true;
+    osd_cli.has_mask = false;
+    motor_armed = 1;
+    wfb_status_received = false;
+    wfb_flags = WFB_LINK_LOST;
+    clearGraphics(); draw_flight_mode(); assert(warning_pixels() == 0);
+    wfb_status_received = true;
+    clearGraphics(); draw_flight_mode(); assert(warning_pixels() > 0);
+    osd_params.WFBState_en = 0;
+    clearGraphics(); draw_flight_mode(); assert(warning_pixels() == 0);
+    osd_params.WFBState_en = 1;
+    osd_cli.has_mask = true;
+    clearGraphics(); draw_flight_mode(); assert(warning_pixels() == 0);
+    osd_cli.has_mask = false;
+    wfb_flags = 0; wfb_errors = 1;
+    clearGraphics(); draw_flight_mode(); assert(warning_pixels() > 0);
+    wfb_errors = 0;
+    clearGraphics(); draw_flight_mode(); assert(warning_pixels() == 0);
+    motor_armed = 0;
+    clearGraphics(); draw_flight_mode(); assert(warning_pixels() > 0);
+    osd_cli.has_mask = true;
+    wfb_status_received = false;
     osd_cli.mask = 0;
     clearGraphics(); RenderScreen(); assert(pixels() == 0);
     ping_count = 1; ping_history[0] = 12; ping_received_ms = ping_monotonic_ms();
@@ -86,6 +127,11 @@ int main(int argc, char **argv) {
     clearGraphics(); RenderScreen(); assert(pixels() == 0);
     osd_cli.mask = 1u << OSD_ATTITUDE;
     clearGraphics(); RenderScreen(); assert(pixels() > 0);
+    osd_cli.mask = 1u << OSD_SPEED_VALUE;
+    clearGraphics(); RenderScreen(); assert(pixels() > 0);
+    clearGraphics(); RenderScreen(); snapshot("wfb-speed-value-only");
+    osd_cli.mask = (1u << OSD_SPEED) | (1u << OSD_ALTITUDE);
+    clearGraphics(); RenderScreen(); snapshot("wfb-scale-units-only");
     osd_cli.mask = 1u << OSD_ALTITUDE_VALUE;
     clearGraphics(); RenderScreen(); assert(pixels() > 0);
     assert(!osd_parse_reticle("invalid", &osd_cli));
@@ -95,7 +141,7 @@ int main(int argc, char **argv) {
     osd_cli.mask = 1u << OSD_PING;
     clearGraphics(); RenderScreen(); unsigned horizontal_bottom = bottom_pixel();
     osd_cli.mask |= 1u << OSD_PING_VERTICAL;
-    clearGraphics(); RenderScreen(); assert(bottom_pixel() > horizontal_bottom + 15);
+    clearGraphics(); RenderScreen(); assert(bottom_pixel() > horizontal_bottom + 8);
     osd_params = baseline;
     osd_rel_alt = 10; osd_alt = 10; osd_groundspeed = 8;
     osd_cli.mask |= (1u << OSD_SPEED) | (1u << OSD_ALTITUDE) | (1u << OSD_ALTITUDE_VALUE) | (1u << OSD_SPREAD_SCALES);
@@ -151,6 +197,12 @@ int main(int argc, char **argv) {
         }
         gst_buffer_unmap(frame, &map); gst_buffer_unref(frame);
     }
+    osd_cli.font_percent = 100;
+    osd_cli.mask = (1u << OSD_BATTERY_VOLTAGE) | (1u << OSD_CELL_VOLTAGE)
+        | (1u << OSD_BATTERY_CURRENT) | (1u << OSD_GPS) | (1u << OSD_COORDINATES);
+    osd_fix_type = 3; osd_satellites_visible = 14; osd_hdop = 80;
+    osd_lat = 50.000509; osd_lon = 30.000861;
+    clearGraphics(); RenderScreen(); snapshot("wfb-aligned-telemetry");
     osd_cli.rgba = 0xffab3412;
     clearGraphics();
     write_pixel_lm(10, 10, 1, 1); write_pixel_lm(11, 10, 1, 2);

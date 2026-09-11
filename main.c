@@ -338,6 +338,8 @@ static int osd_main(int argc, char **argv, bool validate_only)
     static const struct option options[] = {
         {"osd-mask", required_argument, NULL, 1000},
         {"osd-color", required_argument, NULL, 1001},
+        {"osd-warning-color", required_argument, NULL, 1004},
+        {"osd-demo-ping", no_argument, NULL, 1005},
         {"osd-font-percent", required_argument, NULL, 1002},
         {"osd-reticle", required_argument, NULL, 1003},
         {NULL, 0, NULL, 0}
@@ -386,10 +388,19 @@ static int osd_main(int argc, char **argv, bool validate_only)
             break;
         case 1000:
             if (!osd_parse_uint(optarg, true, OSD_KNOWN_MASK, &osd_cli.mask)) {
-                fprintf(stderr, "Invalid --osd-mask: expected 0..0x007FFFFF\n");
+                fprintf(stderr, "Invalid --osd-mask: expected 0..0x00FFFFFF\n");
                 return 2;
             }
             osd_cli.has_mask = true;
+            break;
+        case 1004:
+            if (!osd_parse_color(optarg, &osd_cli.warning_rgba)) {
+                fprintf(stderr, "Invalid --osd-warning-color: expected #RRGGBB\n");
+                return 2;
+            }
+            break;
+        case 1005:
+            osd_cli.demo_ping = true;
             break;
         case 1001:
             if (!osd_parse_color(optarg, &osd_cli.rgba)) {
@@ -492,6 +503,7 @@ static int osd_main(int argc, char **argv, bool validate_only)
             fprintf(stderr, "Disable groups/items examples: -D gps,wfb  |  -D wfb_state  |  -D gps_status,gps_coords\n");
             fprintf(stderr, "WFB-ng OSD version " WFB_OSD_VERSION "\n");
             fprintf(stderr, "  --osd-mask <decimal|0xHEX>  OSD blocks (23 bits, overrides -D)\n"
+                            "  --osd-warning-color '#RRGGBB' Warning color (default #ff0000)\n"
                             "  --osd-color '#RRGGBB'       OSD color (default #00ff00)\n"
                             "  --osd-font-percent 50..150  Text size (default 100)\n"
                             "  --osd-reticle default|compact|cross|circle|none\n");

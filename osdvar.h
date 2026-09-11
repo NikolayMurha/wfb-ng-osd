@@ -105,6 +105,7 @@ extern int8_t wfb_rssi; //WFB rssi
 extern uint16_t wfb_errors;
 extern uint16_t wfb_fec_fixed;
 extern int8_t wfb_flags;
+extern bool wfb_status_received;
 extern bool rc_lost;
 
 extern uint8_t osd_got_home;               // tels if got home position or not
