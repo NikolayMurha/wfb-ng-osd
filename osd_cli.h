@@ -12,18 +12,32 @@ enum osd_bit {
     OSD_ALTITUDE, OSD_ATTITUDE, OSD_THROTTLE, OSD_FLIGHT_TIME,
     OSD_BATTERY_PERCENT, OSD_BATTERY_VOLTAGE, OSD_CELL_VOLTAGE,
     OSD_BATTERY_CURRENT, OSD_GPS, OSD_COORDINATES, OSD_HOME_DISTANCE,
-    OSD_SPEED, OSD_TRIP, OSD_ATTITUDE_VALUES, OSD_COMPACT_RETICLE
+    OSD_SPEED, OSD_TRIP, OSD_ATTITUDE_VALUES, OSD_COMPACT_RETICLE,
+    OSD_ALTITUDE_VALUE, OSD_PING_VERTICAL, OSD_SPREAD_SCALES
 };
-#define OSD_KNOWN_MASK UINT32_C(0x000fffff)
+#define OSD_KNOWN_MASK UINT32_C(0x007fffff)
 #define OSD_GPS_MASK UINT32_C(0x0003e000)
 typedef struct {
     bool has_mask;
+    bool reticle_set;
+    enum { RETICLE_DEFAULT, RETICLE_COMPACT, RETICLE_CROSS, RETICLE_CIRCLE, RETICLE_NONE } reticle;
     bool hide_attitude_values;
     uint32_t mask;
     uint32_t rgba;
     unsigned font_percent;
 } osd_cli_t;
 extern osd_cli_t osd_cli;
+static inline bool osd_parse_reticle(const char *value, osd_cli_t *options) {
+    const char *names[] = {"default", "compact", "cross", "circle", "none"};
+    for (unsigned i = 0; i < 5; ++i) {
+        if (strcmp(value, names[i]) == 0) {
+            options->reticle = i;
+            options->reticle_set = true;
+            return true;
+        }
+    }
+    return false;
+}
 
 static inline bool osd_bit_enabled(enum osd_bit bit) {
     return (osd_cli.mask & (UINT32_C(1) << bit)) != 0;

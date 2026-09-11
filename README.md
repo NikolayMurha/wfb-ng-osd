@@ -5,6 +5,8 @@ GStreamer/OpenGL OSD-компонент для FPV-відео WFB-NG.
 Документація зберігається лише в центральному репозиторії:
 [WFB-NG OSD](https://github.com/LegitForceLab/lte-docs/tree/main/projects/wfb-ng-osd).
 
+[Розташування пінгів, шкал і незалежний курсор](https://github.com/LegitForceLab/lte-docs/blob/main/projects/lte-multiview-player/OSD_LAYOUT.md).
+
 ## Пінг маршруту в OSD
 
 Плеєр отримує пінг через той самий UDP-порт, що й MAVLink-телеметрію

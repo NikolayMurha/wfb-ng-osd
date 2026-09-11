@@ -21,12 +21,34 @@ static unsigned pixels(void) {
     return count;
 }
 
+static unsigned bottom_pixel(void) {
+    GstBuffer *buffer = displayGraphics(); GstMapInfo info;
+    assert(gst_buffer_map(buffer, &info, GST_MAP_READ));
+    unsigned bottom = 0;
+    for (unsigned i = 0; i < info.size / 4; ++i)
+        if (((uint32_t *)info.data)[i]) bottom = i / GRAPHICS_WIDTH;
+    gst_buffer_unmap(buffer, &info); gst_buffer_unref(buffer);
+    return bottom;
+}
+
+static void snapshot(const char *name) {
+    const char *directory = getenv("WFB_OSD_SNAPSHOT_DIR");
+    if (!directory) return;
+    char path[1024]; snprintf(path, sizeof(path), "%s/%s.ppm", directory, name);
+    FILE *file = fopen(path, "wb"); assert(file);
+    GstBuffer *buffer = displayGraphics(); GstMapInfo info;
+    assert(gst_buffer_map(buffer, &info, GST_MAP_READ));
+    fprintf(file, "P6\n%d %d\n255\n", GRAPHICS_WIDTH, GRAPHICS_HEIGHT);
+    for (unsigned i = 0; i < info.size; i += 4) fwrite(info.data + i, 1, 3, file);
+    fclose(file); gst_buffer_unmap(buffer, &info); gst_buffer_unref(buffer);
+}
+
 int main(int argc, char **argv) {
     uint32_t value;
-    assert(osd_parse_uint("0x000FFFFF", true, OSD_KNOWN_MASK, &value) && value == OSD_KNOWN_MASK);
+    assert(osd_parse_uint("0x007FFFFF", true, OSD_KNOWN_MASK, &value) && value == OSD_KNOWN_MASK);
     assert(osd_parse_uint("7679", true, OSD_KNOWN_MASK, &value) && value == 0x1dff);
     assert(osd_parse_uint("0", true, OSD_KNOWN_MASK, &value) && value == 0);
-    const char *invalid[] = {"", "0x", "-1", "+1", " 1", "1 ", "1.0", "0x100000", "4294967296", "999999999999999999999999"};
+    const char *invalid[] = {"", "0x", "-1", "+1", " 1", "1 ", "1.0", "0x800000", "4294967296", "999999999999999999999999"};
     for (unsigned i = 0; i < sizeof(invalid)/sizeof(*invalid); ++i)
         assert(!osd_parse_uint(invalid[i], true, OSD_KNOWN_MASK, &value));
     assert(osd_parse_color("#1234Ab", &value) && value == 0xffab3412);
@@ -56,7 +78,33 @@ int main(int argc, char **argv) {
     clearGraphics(); RenderScreen(); unsigned attitude_with_values = pixels();
     assert(attitude_with_values > attitude_without_values);
     osd_cli.mask |= 1u << OSD_COMPACT_RETICLE;
-    clearGraphics(); RenderScreen(); assert(pixels() == attitude_with_values);
+    clearGraphics(); RenderScreen(); assert(pixels() > 0);
+    osd_cli.mask = 0;
+    assert(osd_parse_reticle("cross", &osd_cli));
+    clearGraphics(); RenderScreen(); assert(pixels() > 0);
+    assert(osd_parse_reticle("none", &osd_cli));
+    clearGraphics(); RenderScreen(); assert(pixels() == 0);
+    osd_cli.mask = 1u << OSD_ATTITUDE;
+    clearGraphics(); RenderScreen(); assert(pixels() > 0);
+    osd_cli.mask = 1u << OSD_ALTITUDE_VALUE;
+    clearGraphics(); RenderScreen(); assert(pixels() > 0);
+    assert(!osd_parse_reticle("invalid", &osd_cli));
+    osd_cli.reticle_set = false;
+    ping_count = 3; ping_history[0] = 32; ping_history[1] = 28; ping_history[2] = 35;
+    ping_received_ms = ping_monotonic_ms();
+    osd_cli.mask = 1u << OSD_PING;
+    clearGraphics(); RenderScreen(); unsigned horizontal_bottom = bottom_pixel();
+    osd_cli.mask |= 1u << OSD_PING_VERTICAL;
+    clearGraphics(); RenderScreen(); assert(bottom_pixel() > horizontal_bottom + 15);
+    osd_params = baseline;
+    osd_rel_alt = 10; osd_alt = 10; osd_groundspeed = 8;
+    osd_cli.mask |= (1u << OSD_SPEED) | (1u << OSD_ALTITUDE) | (1u << OSD_ALTITUDE_VALUE) | (1u << OSD_SPREAD_SCALES);
+    assert(osd_parse_reticle("cross", &osd_cli));
+    clearGraphics(); RenderScreen(); snapshot("wfb-vertical-spread");
+    osd_cli.mask &= ~((1u << OSD_PING_VERTICAL) | (1u << OSD_SPREAD_SCALES));
+    assert(osd_parse_reticle("none", &osd_cli));
+    osd_cli.mask |= 1u << OSD_ATTITUDE;
+    clearGraphics(); RenderScreen(); snapshot("wfb-horizontal-no-reticle");
     unsigned counts[3];
     for (unsigned i = 0; i < 3; ++i) {
         osd_cli.font_percent = 50 + i * 50;

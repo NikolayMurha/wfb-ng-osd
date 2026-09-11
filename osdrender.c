@@ -180,7 +180,7 @@ static void draw_mask_screen(void) {
   BLOCK(Throt_en, OSD_THROTTLE); BLOCK(Time_en, OSD_FLIGHT_TIME);
   BLOCK(GpsStatus_en, OSD_GPS); BLOCK(GpsHDOP_en, OSD_GPS);
   BLOCK(GpsLat_en, OSD_COORDINATES); BLOCK(GpsLon_en, OSD_COORDINATES);
-  BLOCK(TSPD_en, OSD_SPEED); BLOCK(TotalTripDist_en, OSD_TRIP);
+  BLOCK(TSPD_en, OSD_SPEED); BLOCK(Speed_scale_en, OSD_SPEED); BLOCK(TotalTripDist_en, OSD_TRIP);
   BLOCK(OSDMessages_en, OSD_WARNINGS);
 #undef BLOCK
   if (!(osd_cli.mask & OSD_GPS_MASK)) osd_params.Alarm_GPS_status_en = 0;
@@ -189,7 +189,7 @@ static void draw_mask_screen(void) {
   draw_battery_readout();
   draw_altitude_scale(); draw_uav2d(); draw_throttle(); draw_time();
   draw_gps_status(); draw_gps_hdop(); draw_gps_latitude(); draw_gps_longitude();
-  draw_ground_speed(); draw_total_trip();
+  draw_speed_scale(); draw_total_trip();
   if (osd_bit_enabled(OSD_WARNINGS)) { draw_warning(); draw_osd_messages(); }
   draw_dvr_indicator();
 }
@@ -254,27 +254,25 @@ void draw_ping(void)
 {
     if (!ping_enabled || ping_count == 0) return;
     bool stale = ping_monotonic_ms() - ping_received_ms > 5000;
-    int color = stale || ping_history[0] < 0 ? 2 : 1;
-    int x = 15;
-    for (unsigned i = 0; i < ping_count + 1; ++i) {
-        // Current ping and unit use the battery font; history uses the smaller 8x8 font.
-        int font = i == 0 || i == ping_count ? SIZE_TO_FONT[0] : 1;
-        if (i == ping_count) {
-            snprintf(tmp_str, sizeof(tmp_str), "ms");
-        } else {
-            char value[16];
-            if (ping_history[i] < 0 || (i == 0 && stale))
-                snprintf(value, sizeof(value), "---");
-            else
-                snprintf(value, sizeof(value), "%d", (int)ping_history[i]);
-            snprintf(tmp_str, sizeof(tmp_str), "%s%s", i == 0 ? "PING " : "", value);
-        }
+    bool vertical = osd_cli.has_mask && osd_bit_enabled(OSD_PING_VERTICAL);
+    int x = 15, y = 14;
+    for (unsigned i = 0; i < ping_count && i < 3; ++i) {
+        int font = i == 0 ? 0 : 1; // 8x14 current, 8x8 history.
+        char value[16];
+        bool missing = ping_history[i] < 0 || (i == 0 && stale);
+        if (missing) snprintf(value, sizeof(value), "---");
+        else snprintf(value, sizeof(value), "%d", (int)ping_history[i]);
+        snprintf(tmp_str, sizeof(tmp_str), "%s%s ms", i == 0 ? "PING " : "", value);
         struct FontEntry info;
         struct FontDimensions dim;
         fetch_font_info(0, font, &info, NULL);
         calc_text_dimensions(tmp_str, info, 0, 0, &dim);
-        write_color_string(tmp_str, x, 29, 0, 0, TEXT_VA_BOTTOM, TEXT_HA_LEFT, 0, font, color);
-        x += (dim.width * osd_cli.font_percent + 99) / 100 + 3;
+        int width = (dim.width * osd_cli.font_percent + 99) / 100 + 6;
+        int height = (dim.height * osd_cli.font_percent + 99) / 100 + 4;
+        if (i == 0) write_rectangle_outlined(x, y, width, height, 0, 1);
+        write_color_string(tmp_str, x + 3, y + 2, 0, 0, TEXT_VA_TOP, TEXT_HA_LEFT, 0, font, missing ? 2 : 1);
+        if (vertical) y += height + 3;
+        else x += width + 3;
     }
 }
 
@@ -312,6 +310,31 @@ void draw_osd_messages()
 }
 
 
+static void draw_reticle(void) {
+  int x = simple_attitude.x0, y = simple_attitude.y0;
+  int radius = 4 * atti_mp_scale;
+  int style = osd_cli.reticle;
+  if (!osd_cli.reticle_set && osd_cli.has_mask && osd_bit_enabled(OSD_COMPACT_RETICLE)) style = RETICLE_COMPACT;
+  if (style == RETICLE_NONE) return;
+  if (style == RETICLE_DEFAULT) {
+  write_line_outlined(x - radius - 1, y, x - 3 * radius - 1, y, 0, 0, 0, 1);
+  write_line_outlined(x + radius - 1, y, x + 3 * radius + 1, y, 0, 0, 0, 1);
+  write_line_outlined(x, y - radius - 1, x, y - 3 * radius, 0, 0, 0, 1);
+  write_circle_outlined(x, y, radius, 0, 1, 0, 1, 1);
+
+  } else if (style == RETICLE_CIRCLE) {
+    write_circle_outlined(x, y, radius, 0, 1, 0, 1, 1);
+  } else if (style == RETICLE_COMPACT) {
+    write_line_outlined(x-radius, y, x+radius, y, 0,0,0,1);
+    write_line_outlined(x, y-radius, x, y+radius, 0,0,0,1);
+  } else {
+    write_line_outlined(x-3*radius, y, x-radius, y, 0,0,0,1);
+    write_line_outlined(x+radius, y, x+3*radius, y, 0,0,0,1);
+    write_line_outlined(x, y-3*radius, x, y-radius, 0,0,0,1);
+    write_line_outlined(x, y+radius, x, y+3*radius, 0,0,0,1);
+  }
+}
+
 void draw_simple_attitude() {
   Reset_Polygon2D(&simple_attitude);
   const int radius = 4 * atti_mp_scale;
@@ -322,10 +345,7 @@ void draw_simple_attitude() {
   int line_mode = fabsf(osd_roll) < 90 ? 0 : 2;
   int roll_color = fabsf(osd_roll) < 90 ? 1 : 2;
 
-  write_line_outlined(x - radius - 1, y, x - 3 * radius - 1, y, 0, 0, 0, 1);
-  write_line_outlined(x + radius - 1, y, x + 3 * radius + 1, y, 0, 0, 0, 1);
-  write_line_outlined(x, y - radius - 1, x, y - 3 * radius, 0, 0, 0, 1);
-  write_circle_outlined(x, y, radius, 0, 1, 0, 1, 1);
+  draw_reticle();
 
   Transform_Polygon2D(&simple_attitude, -osd_roll, 0, osd_pitch);
 
@@ -386,11 +406,16 @@ void draw_radar() {
   int wingStart = (int)(12.0f * atti_mp_scale);
   int wingEnd = (int)(7.0f * atti_mp_scale);
 
+  if (osd_cli.reticle_set) {
+    draw_reticle();
+  } else {
   //draw uav
   write_line_outlined(x, y, x - 9, y + 5, 2, 2, 0, 1);
   write_line_outlined(x, y, x + 9, y + 5, 2, 2, 0, 1);
   write_line_outlined(x - wingStart, y, x - wingEnd, y, 2, 2, 0, 1);
   write_line_outlined(x + wingEnd, y, x + wingStart, y, 2, 2, 0, 1);
+
+  }
 
   write_filled_rectangle_lm(x - 9, y + 6, 15, 9, 0, 1);
   snprintf(tmp_str, sizeof(tmp_str), "%d", (int)osd_pitch);
@@ -440,6 +465,7 @@ void draw_home_direction() {
 void draw_uav2d() {
   if (!enabledAndShownOnPanel(osd_params.Atti_mp_en,
                               osd_params.Atti_mp_panel)) {
+    if (osd_cli.reticle_set) draw_reticle();
     return;
   }
 
@@ -1287,6 +1313,8 @@ void draw_head_wp_home() {
   //draw compass
   posX = osd_params.CWH_Nmode_posX;
   posY = osd_params.CWH_Nmode_posY;
+  if (osd_cli.has_mask && osd_bit_enabled(OSD_PING) && osd_bit_enabled(OSD_PING_VERTICAL))
+      posY += 35 * osd_cli.font_percent / 100;
   r = osd_params.CWH_Nmode_radius;
   write_circle_outlined(posX, posY, r, 0, 1, 0, 1, 1);
   write_string("N", posX, posY - r + 2, 0, 0, TEXT_VA_TOP, TEXT_HA_CENTER, 0, SIZE_TO_FONT[0]);
@@ -1858,12 +1886,15 @@ void draw_wfb_state() {
 
 
 void draw_altitude_scale() {
-  if (!enabledAndShownOnPanel(osd_params.Alt_Scale_en,
-                              osd_params.Alt_Scale_panel)) {
+  bool scale_visible = enabledAndShownOnPanel(osd_params.Alt_Scale_en, osd_params.Alt_Scale_panel);
+  bool value_visible = osd_cli.has_mask ? osd_bit_enabled(OSD_ALTITUDE_VALUE) : scale_visible;
+  if (!scale_visible && !value_visible) {
     return;
   }
 
-  uint16_t posX = osd_params.Alt_Scale_posX;
+  uint16_t scaleX = osd_cli.has_mask && osd_bit_enabled(OSD_SPREAD_SCALES)
+      ? GRAPHICS_RIGHT - 65 * osd_cli.font_percent / 100 : osd_params.Alt_Scale_posX;
+  uint16_t posX = scaleX;
   float alt_shown;
   float min_alt = 10;
 
@@ -1880,10 +1911,11 @@ void draw_altitude_scale() {
       }
   }
 
+  if (scale_visible) {
   // Set min alt 3m
   draw_vertical_scale(alt_shown * convert_distance, 60,
                       osd_params.Alt_Scale_align,
-                      osd_params.Alt_Scale_posX,
+                      scaleX,
                       osd_params.Alt_Scale_posY, 130,
 		      5, 10, 5, 8, 11,
                       10000, HUD_VSCALE_FLAG_NO_NEGATIVE, min_alt);
@@ -1901,7 +1933,10 @@ void draw_altitude_scale() {
       posX += 5;
   }
 
-  write_string("[m]", posX,
+  }
+  if (!value_visible) return;
+  snprintf(tmp_str, sizeof(tmp_str), "%.0f %s", alt_shown * convert_distance, osd_params.Units_mode == 1 ? "ft" : "m");
+  write_string(tmp_str, scaleX,
                osd_params.Alt_Scale_posY + 60 + 20, 0, 0, TEXT_VA_TOP,
                osd_params.Alt_Scale_align, 0,
                SIZE_TO_FONT[0]);
@@ -1953,6 +1988,8 @@ void draw_speed_scale() {
       return;
   }
 
+  int scaleX = osd_cli.has_mask && osd_bit_enabled(OSD_SPREAD_SCALES)
+      ? 65 * osd_cli.font_percent / 100 : osd_params.Speed_scale_posX;
   float spd_shown ;
   float vmin = -1;
   int  flags = HUD_VSCALE_FLAG_NO_NEGATIVE;
@@ -1970,18 +2007,18 @@ void draw_speed_scale() {
 
   draw_vertical_scale(spd_shown * convert_speed, 60,
                       osd_params.Speed_scale_align,
-                      osd_params.Speed_scale_posX,
+                      scaleX,
                       osd_params.Speed_scale_posY, 130,
 		      5, 10, 5, 8, 11,
                       100, flags, vmin);
 
-  write_string(tmp_str, osd_params.Speed_scale_posX,
+  write_string(tmp_str, scaleX,
                osd_params.Speed_scale_posY - 70 - 15, 0, 0, TEXT_VA_TOP,
                osd_params.Speed_scale_align, 0,
                SIZE_TO_FONT[0]);
 
   snprintf(tmp_str, sizeof(tmp_str), "[%s]", spd_unit);
-  write_string(tmp_str, osd_params.Speed_scale_posX,
+  write_string(tmp_str, scaleX,
                osd_params.Speed_scale_posY + 60 + 20, 0, 0, TEXT_VA_TOP,
                osd_params.Speed_scale_align, 0,
                SIZE_TO_FONT[0]);

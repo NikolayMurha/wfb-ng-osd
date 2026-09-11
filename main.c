@@ -339,6 +339,7 @@ static int osd_main(int argc, char **argv, bool validate_only)
         {"osd-mask", required_argument, NULL, 1000},
         {"osd-color", required_argument, NULL, 1001},
         {"osd-font-percent", required_argument, NULL, 1002},
+        {"osd-reticle", required_argument, NULL, 1003},
         {NULL, 0, NULL, 0}
     };
     int osd_port = 14551;
@@ -377,9 +378,15 @@ static int osd_main(int argc, char **argv, bool validate_only)
 
     while ((opt = getopt_long(argc, argv, "hdp:P:R:D:F:45j:THi:xakgs:w:O:S:B:E:nc:", options, NULL)) != -1) {
         switch (opt) {
+        case 1003:
+            if (!osd_parse_reticle(optarg, &osd_cli)) {
+                fprintf(stderr, "Invalid --osd-reticle: default|compact|cross|circle|none\n");
+                return 2;
+            }
+            break;
         case 1000:
             if (!osd_parse_uint(optarg, true, OSD_KNOWN_MASK, &osd_cli.mask)) {
-                fprintf(stderr, "Invalid --osd-mask: expected 0..0x000FFFFF\n");
+                fprintf(stderr, "Invalid --osd-mask: expected 0..0x007FFFFF\n");
                 return 2;
             }
             osd_cli.has_mask = true;
@@ -484,9 +491,10 @@ static int osd_main(int argc, char **argv, bool validate_only)
 #endif
             fprintf(stderr, "Disable groups/items examples: -D gps,wfb  |  -D wfb_state  |  -D gps_status,gps_coords\n");
             fprintf(stderr, "WFB-ng OSD version " WFB_OSD_VERSION "\n");
-            fprintf(stderr, "  --osd-mask <decimal|0xHEX>  OSD blocks (20 bits, overrides -D)\n"
+            fprintf(stderr, "  --osd-mask <decimal|0xHEX>  OSD blocks (23 bits, overrides -D)\n"
                             "  --osd-color '#RRGGBB'       OSD color (default #00ff00)\n"
-                            "  --osd-font-percent 50..150  Text size (default 100)\n");
+                            "  --osd-font-percent 50..150  Text size (default 100)\n"
+                            "  --osd-reticle default|compact|cross|circle|none\n");
             fprintf(stderr, "WFB-ng home page: <http://wfb-ng.org>\n");
             exit(1);
         }
