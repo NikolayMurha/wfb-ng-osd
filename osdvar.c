@@ -19,6 +19,8 @@
  */
 #include "osdvar.h"
 #include "osd_cli.h"
+#include <inttypes.h>
+#include <stdio.h>
 osd_cli_t osd_cli = { .rgba = 0xff00ff00u, .warning_rgba = 0xff0000ffu, .font_percent = 100 };
 #include <time.h>
 
@@ -43,6 +45,18 @@ uint8_t mav_component;
 uint64_t sys_start_time = 0;
 uint64_t armed_start_time = 0;
 uint64_t total_armed_time = 0;
+uint64_t osd_flight_time_ms(uint64_t now_ms)
+{
+    if (motor_armed)
+        return now_ms >= armed_start_time ? now_ms - armed_start_time : 0;
+    return total_armed_time;
+}
+void osd_format_flight_time(char *buffer, size_t size, uint64_t now_ms)
+{
+    const uint64_t seconds = osd_flight_time_ms(now_ms) / 1000;
+    snprintf(buffer, size, "%02" PRIu64 ":%02" PRIu64 ":%02" PRIu64,
+             seconds / 3600, (seconds / 60) % 60, seconds % 60);
+}
 uint8_t vtol_state = 0;
 
 /////////////////////////////////////////////////////////////////////////

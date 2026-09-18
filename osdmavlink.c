@@ -129,11 +129,14 @@ void parse_mavlink_packet(uint8_t *buf, int buflen, mavlink_rx_meta_t *meta)
             last_motor_armed = motor_armed;
             motor_armed = base_mode & MAV_MODE_FLAG_SAFETY_ARMED;
 
-            if (!last_motor_armed && motor_armed)
+            if (!last_motor_armed && motor_armed) {
                 armed_start_time = GetSystimeMS();
+                total_armed_time = 0;
+            }
 
             if (last_motor_armed && !motor_armed) {
-                total_armed_time = GetSystimeMS() - armed_start_time + total_armed_time;
+                const uint64_t now = GetSystimeMS();
+                total_armed_time = now >= armed_start_time ? now - armed_start_time : 0;
                 armed_start_time = 0;
             }
             break;

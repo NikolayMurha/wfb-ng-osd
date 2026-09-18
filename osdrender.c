@@ -22,7 +22,6 @@
 
 #include <assert.h>
 #include <inttypes.h>
-#include <sys/time.h>
 #include <time.h>
 #include "osdrender.h"
 #include "betaflight_modes.h"
@@ -72,10 +71,7 @@ const char * spd_unit = METRIC_SPEED;
 
 
 uint64_t GetSystimeMS(void) {
-    struct timeval te;
-    gettimeofday(&te, NULL); // get current time
-    uint64_t milliseconds = te.tv_sec * 1000LL + te.tv_usec / 1000; // caculate milliseconds
-    return milliseconds;
+    return ping_monotonic_ms();
 }
 
 
@@ -749,21 +745,7 @@ void draw_time() {
     return;
   }
 
-  if(osd_debug)
-  {
-      snprintf(tmp_str, sizeof(tmp_str), "%" PRIu64, (uint64_t)(GetSystimeMS() % 1000000ULL));
-  }
-  else
-  {
-      time_t t = time(NULL);
-      struct tm *lt = localtime(&t);
-
-      if (lt == NULL){
-          return;
-      }
-
-      strftime(tmp_str, sizeof(tmp_str), "%H:%M:%S", lt);
-  }
+  osd_format_flight_time(tmp_str, sizeof(tmp_str), GetSystimeMS());
 
   write_string(tmp_str, osd_params.Time_posX,
                osd_params.Time_posY, 0, 0, TEXT_VA_TOP,

@@ -31,6 +31,26 @@ int main(void) {
     now += 2001;
     receive(&msg);
     assert(osd_rel_alt == 100);
+    assert(osd_flight_time_ms(now) == 0);
+    mavlink_msg_heartbeat_pack(1, 1, &msg, 2, 0, 80 | MAV_MODE_FLAG_SAFETY_ARMED, 1, 3);
+    receive(&msg);
+    assert(motor_armed && osd_flight_time_ms(now) == 0);
+    now += 125000;
+    assert(osd_flight_time_ms(now) == 125000);
+    char timer[32];
+    osd_format_flight_time(timer, sizeof(timer), now);
+    assert(strcmp(timer, "00:02:05") == 0);
+    mavlink_msg_heartbeat_pack(1, 1, &msg, 2, 0, 80, 1, 3);
+    receive(&msg);
+    now += 5000;
+    assert(!motor_armed && osd_flight_time_ms(now) == 125000);
+    mavlink_msg_heartbeat_pack(1, 1, &msg, 2, 0, 80 | MAV_MODE_FLAG_SAFETY_ARMED, 1, 3);
+    receive(&msg);
+    assert(osd_flight_time_ms(now) == 0);
+    osd_format_flight_time(timer, sizeof(timer), now);
+    assert(strcmp(timer, "00:00:00") == 0);
+    now += 2500;
+    assert(osd_flight_time_ms(now) == 2500);
     assert(strcmp(betaflight_mode_name(7), "FAILSAFE") == 0);
     assert(strcmp(betaflight_mode_name(100), "UNKNOWN") == 0);
 }

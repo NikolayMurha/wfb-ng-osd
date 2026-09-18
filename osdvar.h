@@ -3,6 +3,7 @@
 
 #include <math.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 extern int32_t ping_history[3];
@@ -22,6 +23,8 @@ extern uint8_t mav_component;
 extern uint64_t sys_start_time;
 extern uint64_t armed_start_time;
 extern uint64_t total_armed_time;
+uint64_t osd_flight_time_ms(uint64_t now_ms);
+void osd_format_flight_time(char *buffer, size_t size, uint64_t now_ms);
 extern uint8_t vtol_state;
 
 /////////////////////////////////////////////////////////////////////////
