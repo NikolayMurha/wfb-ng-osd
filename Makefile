@@ -117,6 +117,12 @@ osdmavlink.o: battery_cells.h
 
 osdrender.o: betaflight_modes.h
 main.o osdrender.o graphengine.o osdvar.o: osd_cli.h
+appsrc.o: gst_dvr_finalize.h
+
+.PHONY: test-dvr
+test-dvr:
+	$(CC) -std=gnu99 -Wall -I. $(shell pkg-config --cflags gstreamer-1.0) tests/dvr_finalize_test.c $(shell pkg-config --libs gstreamer-1.0) -o /tmp/wfb-osd-dvr-test
+	/tmp/wfb-osd-dvr-test
 
 .PHONY: test-osd-cli
 test-osd-cli: $(filter-out main.o appsrc.o gst-compat.o,$(OBJS))

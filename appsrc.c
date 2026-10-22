@@ -32,8 +32,33 @@
 #include <stdlib.h>
 #include <string.h>
 #include <glib.h>
+#include <signal.h>
 
 #include "graphengine.h"
+#include "gst_dvr_finalize.h"
+
+extern volatile sig_atomic_t finished;
+
+static gboolean stop_if_requested(gpointer user_data)
+{
+    if (finished)
+        g_main_loop_quit((GMainLoop *)user_data);
+    return G_SOURCE_CONTINUE;
+}
+
+static void finish_pipeline(GstElement *pipeline, GMainLoop *loop, guint stop_watch)
+{
+    g_source_remove(stop_watch);
+    GstBus *bus = gst_element_get_bus(pipeline);
+    if (g_object_get_data(G_OBJECT(bus), "dvr-eos-received") == NULL &&
+        !dvr_finalize(pipeline, 2 * GST_SECOND, NULL, NULL))
+        g_warning("Не вдалося дочекатися завершення запису відео");
+    gst_element_set_state(pipeline, GST_STATE_NULL);
+    gst_bus_remove_signal_watch(bus);
+    gst_object_unref(bus);
+    gst_object_unref(pipeline);
+    g_main_loop_unref(loop);
+}
 
 // For gstreamer < 1.18
 GstClockTime gst_element_get_current_running_time (GstElement * element);
@@ -81,6 +106,7 @@ on_message (GstBus * bus, GstMessage * message, gpointer user_data)
     }
 
     case GST_MESSAGE_EOS:
+        g_object_set_data(G_OBJECT(bus), "dvr-eos-received", GINT_TO_POINTER(1));
         g_main_loop_quit (loop);
         break;
 
@@ -521,6 +547,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts, osd_rend
     gst_init (NULL, NULL);
 
     GMainLoop *loop = g_main_loop_new (NULL, FALSE);
+    guint stop_watch = g_timeout_add(50, stop_if_requested, loop);
     GstElement *pipeline = NULL;
 
     if (plain_player) {
@@ -560,8 +587,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts, osd_rend
 #endif
         gst_element_set_state(pipeline, GST_STATE_PLAYING);
         g_main_loop_run(loop);
-        gst_element_set_state(pipeline, GST_STATE_NULL);
-        gst_object_unref(pipeline);
+        finish_pipeline(pipeline, loop, stop_watch);
         return 0;
     }
 
@@ -851,9 +877,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts, osd_rend
     gst_element_set_state (pipeline, GST_STATE_PLAYING);
 
     g_main_loop_run (loop);
-    gst_element_set_state (pipeline, GST_STATE_NULL);
-
-    gst_object_unref (pipeline);
+    finish_pipeline(pipeline, loop, stop_watch);
 
     return 0;
 }

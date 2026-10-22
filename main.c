@@ -74,13 +74,13 @@ typedef struct {
 static void *gst_thread_start(void *arg)
 {
     gst_thread_args_t *args = (gst_thread_args_t *)arg;
-    gst_main(args->rtp_port, args->codec, args->rtp_jitter, args->udp_mpegts, args->osd_render, args->screen_width, args->input_url, args->video_sink, args->dvr_path, args->dvr_segment_secs, args->dvr_bitrate, args->dvr_preset, args->plain_player, args->rtp_forward_host, args->rtp_forward_port);
+    int result = gst_main(args->rtp_port, args->codec, args->rtp_jitter, args->udp_mpegts, args->osd_render, args->screen_width, args->input_url, args->video_sink, args->dvr_path, args->dvr_segment_secs, args->dvr_bitrate, args->dvr_preset, args->plain_player, args->rtp_forward_host, args->rtp_forward_port);
     fprintf(stderr, "gst thread exited\n");
-    exit(1);
+    exit(result);
 }
 #endif
 
-static volatile uint8_t finished = 0;
+volatile sig_atomic_t finished = 0;
 int osd_debug = 0;
 int dvr_recording = 0;
 
@@ -566,6 +566,8 @@ static int osd_main(int argc, char **argv, bool validate_only)
     };
 
     pthread_t tid;
+    signal(SIGTERM, sigterm_handler);
+    signal(SIGINT, sigterm_handler);
     pthread_create(&tid, NULL, gst_thread_start, &gst_args);
 
     while (1) {
