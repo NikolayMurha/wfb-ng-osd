@@ -2,6 +2,7 @@
 #define GST_DVR_FINALIZE_H
 
 #include <gst/gst.h>
+#include "gst_dvr_timeline.h"
 
 /* A silent network source does not end the last GOP in splitmuxsink. Send
  * EOS before NULL, including after an arbitrarily long input outage. Dispatch
@@ -9,6 +10,7 @@
 static void dvr_send_eos(GstElement *pipeline, gpointer unused)
 {
     (void)unused;
+    dvr_timeline_end(pipeline);
     gst_element_send_event(pipeline, gst_event_new_eos());
 }
 

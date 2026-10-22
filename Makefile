@@ -117,12 +117,20 @@ osdmavlink.o: battery_cells.h
 
 osdrender.o: betaflight_modes.h
 main.o osdrender.o graphengine.o osdvar.o: osd_cli.h
-appsrc.o: gst_dvr_finalize.h
+appsrc.o: gst_dvr_finalize.h gst_dvr_timeline.h
 
 .PHONY: test-dvr
 test-dvr:
 	$(CC) -std=gnu99 -Wall -I. $(shell pkg-config --cflags gstreamer-1.0) tests/dvr_finalize_test.c $(shell pkg-config --libs gstreamer-1.0) -o /tmp/wfb-osd-dvr-test
 	/tmp/wfb-osd-dvr-test
+	$(CC) -std=gnu99 -Wall -I. $(shell pkg-config --cflags gstreamer-check-1.0) tests/dvr_continuous_test.c $(shell pkg-config --libs gstreamer-check-1.0) -o /tmp/wfb-osd-continuous-test
+	/tmp/wfb-osd-continuous-test
+
+# Requires PyGObject, FFmpeg and an available GL context (e.g. Xvfb/Mesa).
+.PHONY: test-dvr-integration
+test-dvr-integration: osd
+	$(PYTHON) tests/continuous_recording.py
+	$(PYTHON) tests/continuous_recording.py --srt
 
 .PHONY: test-osd-cli
 test-osd-cli: $(filter-out main.o appsrc.o gst-compat.o,$(OBJS))

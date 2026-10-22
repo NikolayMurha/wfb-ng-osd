@@ -72,6 +72,12 @@ on_message (GstBus * bus, GstMessage * message, gpointer user_data)
     switch (GST_MESSAGE_TYPE (message)) {
     case GST_MESSAGE_ERROR:
     {
+        GstElement *pipeline = (GstElement *)g_object_get_data(G_OBJECT(bus), "dvr-pipeline");
+        gboolean recovering = pipeline != NULL && dvr_timeline_recover_source(pipeline, message);
+        if (recovering) {
+            g_warning("Зв’язок із відео втрачено. Очікуємо відновлення; запис триває.");
+            break;
+        }
         GError *err = NULL;
         gchar *debug;
 
@@ -336,6 +342,9 @@ static char* build_plain_output_chain(const char *plain_sink, const char *dvr_pa
              "videoconvert ! "
              "%s "
              "plain_dvr_tee. ! queue leaky=downstream max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+             "identity name=dvr_input ! "
+             "compositor name=dvr_clock force-live=true ignore-inactive-pads=true sink_0::repeat-after-eos=true ! "
+             "video/x-raw,framerate=30/1 ! identity name=dvr_output ! "
              "videoconvert ! "
              "video/x-raw,format=I420 ! "
              "x264enc tune=zerolatency speed-preset=%s bitrate=%d key-int-max=60 ! "
@@ -427,7 +436,7 @@ static char* build_plain_pipeline(int rtp_port, char *codec, int rtp_jitter, int
 
     if (input_url != NULL && g_str_has_prefix(input_url, "srt://")) {
         is_mpegts_source = TRUE;
-        asprintf(&src_str, "srtsrc uri=\"%s\" latency=%d", input_url, rtp_jitter);
+        asprintf(&src_str, "srtsrc uri=\"%s\" latency=%d auto-reconnect=true keep-listening=true", input_url, rtp_jitter);
     } else if (input_url != NULL &&
                (g_str_has_prefix(input_url, "rtsp://") ||
                 g_str_has_prefix(input_url, "rtsps://"))) {
@@ -566,7 +575,12 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts, osd_rend
             exit(1);
         }
         g_assert(pipeline);
+        if (dvr_path != NULL && !dvr_timeline_attach(pipeline)) {
+            g_printerr("Не вдалося налаштувати безперервний запис відео\n");
+            return 1;
+        }
         GstBus *bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline));
+        g_object_set_data(G_OBJECT(bus), "dvr-pipeline", pipeline);
         gst_bus_add_signal_watch(bus);
         g_signal_connect(G_OBJECT(bus), "message", G_CALLBACK(on_message), loop);
         gst_object_unref(GST_OBJECT(bus));
@@ -616,7 +630,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts, osd_rend
         {
             is_mpegts_source = TRUE;
             asprintf(&src_str,
-                     "srtsrc uri=\"%s\" latency=%d",
+                     "srtsrc uri=\"%s\" latency=%d auto-reconnect=true keep-listening=true",
                      input_url, rtp_jitter);
         }
         else if (input_url != NULL &&
@@ -685,11 +699,16 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts, osd_rend
          *
          * sink_0 (відео) z=-2, sink_1 (OSD) z=0 — OSD поверх відео.
          */
-        const char *mixer_chain =
-            "glvideomixerelement emit-signals=true start-time-selection=1 name=osd_mixer "
+        char *mixer_chain = g_strconcat(
+            dvr_path != NULL
+                ? "identity name=dvr_input ! glvideomixerelement force-live=true start-time-selection=0 sink_0::repeat-after-eos=true "
+                : "glvideomixerelement start-time-selection=1 ",
+            "emit-signals=true name=osd_mixer "
             "sink_0::emit-signals=true sink_0::width=%d sink_0::height=%d sink_0::zorder=-2 "
             "sink_1::emit-signals=true sink_1::width=%d sink_1::height=%d sink_1::zorder=0 "
-            "! %s ";
+            "! ", dvr_path != NULL
+                ? "video/x-raw(memory:GLMemory),framerate=30/1 ! identity name=dvr_output ! %s "
+                : "%s ", NULL);
 
         const char *osd_branch =
             "appsrc name=osd_src stream-type=0 format=time min-latency=0 ! "
@@ -811,6 +830,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts, osd_rend
             }
         }
 
+        g_free(mixer_chain);
         free(sink_str);
         free(src_str);
         if (forward_branch != NULL)
@@ -832,6 +852,10 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts, osd_rend
     }
 
     g_assert(pipeline);
+    if (dvr_path != NULL && !dvr_timeline_attach(pipeline)) {
+        g_printerr("Не вдалося налаштувати безперервний запис відео\n");
+        return 1;
+    }
 
     /* Connect appsrc need-data signal — pushes OSD frames into mixer.sink_1 */
     {
@@ -843,6 +867,7 @@ int gst_main(int rtp_port, char *codec, int rtp_jitter, int udp_mpegts, osd_rend
     // Set message handler
     {
         GstBus *bus = gst_pipeline_get_bus (GST_PIPELINE (pipeline));
+        g_object_set_data(G_OBJECT(bus), "dvr-pipeline", pipeline);
         gst_bus_add_signal_watch (bus);
         g_signal_connect (G_OBJECT (bus), "message", G_CALLBACK (on_message), loop);
         gst_object_unref (GST_OBJECT (bus));
